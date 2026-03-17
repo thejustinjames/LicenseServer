@@ -1,6 +1,6 @@
 import { prisma } from '../config/database.js';
 import { stripe } from '../config/stripe.js';
-import { Product, ValidationMode, PricingType } from '@prisma/client';
+import { Product, ValidationMode, PricingType, PurchaseType } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface CreateProductInput {
@@ -9,14 +9,21 @@ export interface CreateProductInput {
   category?: string;
   validationMode?: ValidationMode;
   pricingType?: PricingType;
+  purchaseType?: PurchaseType;
   licenseDurationDays?: number;
   s3PackageKey?: string;
   version?: string;
   features?: string[];
   createStripeProduct?: boolean;
+  // Monthly pricing
   stripePriceAmount?: number;
   stripePriceCurrency?: string;
   stripePriceInterval?: 'month' | 'year';
+  // Annual pricing (optional, for subscription products)
+  stripePriceAmountAnnual?: number;
+  // Local price display (in cents)
+  priceMonthly?: number;
+  priceAnnual?: number;
   // Metered billing options
   meteredUsageType?: 'licensed' | 'metered' | 'aggregated';
   meteredAggregateUsage?: 'sum' | 'last_during_period' | 'last_ever' | 'max';
@@ -36,10 +43,13 @@ export interface UpdateProductInput {
   category?: string | null;
   validationMode?: ValidationMode;
   pricingType?: PricingType;
+  purchaseType?: PurchaseType;
   licenseDurationDays?: number | null;
   s3PackageKey?: string;
   version?: string;
   features?: string[];
+  priceMonthly?: number | null;
+  priceAnnual?: number | null;
 }
 
 /**
@@ -53,6 +63,9 @@ function generateIdempotencyKey(operation: string, resourceId?: string): string 
 export async function createProduct(input: CreateProductInput): Promise<Product> {
   let stripeProductId: string | undefined;
   let stripePriceId: string | undefined;
+  let stripePriceIdAnnual: string | undefined;
+
+  const isOneTime = input.purchaseType === 'ONE_TIME';
 
   if (input.createStripeProduct && input.stripePriceAmount !== undefined) {
     const idempotencyKey = generateIdempotencyKey('create-product', input.name);
@@ -92,14 +105,16 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       };
       // For metered pricing, unit_amount is the price per unit
       priceParams.unit_amount = input.stripePriceAmount;
-    } else {
-      // Fixed pricing
+    } else if (isOneTime) {
+      // One-time payment - no recurring
       priceParams.unit_amount = input.stripePriceAmount;
-      if (input.stripePriceInterval) {
-        priceParams.recurring = {
-          interval: input.stripePriceInterval,
-        };
-      }
+      // No recurring field for one-time payments
+    } else {
+      // Subscription - monthly pricing
+      priceParams.unit_amount = input.stripePriceAmount;
+      priceParams.recurring = {
+        interval: 'month',
+      };
     }
 
     // Add tax behavior
@@ -111,6 +126,29 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       idempotencyKey: priceIdempotencyKey,
     });
     stripePriceId = stripePrice.id;
+
+    // Create annual price for subscriptions if amount provided
+    if (!isOneTime && !isMetered && input.stripePriceAmountAnnual) {
+      const annualPriceIdempotencyKey = generateIdempotencyKey('create-annual-price', stripeProduct.id);
+
+      const annualPriceParams: Parameters<typeof stripe.prices.create>[0] = {
+        product: stripeProduct.id,
+        currency: input.stripePriceCurrency || 'usd',
+        unit_amount: input.stripePriceAmountAnnual,
+        recurring: {
+          interval: 'year',
+        },
+      };
+
+      if (input.taxBehavior) {
+        annualPriceParams.tax_behavior = input.taxBehavior;
+      }
+
+      const stripeAnnualPrice = await stripe.prices.create(annualPriceParams, {
+        idempotencyKey: annualPriceIdempotencyKey,
+      });
+      stripePriceIdAnnual = stripeAnnualPrice.id;
+    }
   }
 
   return prisma.product.create({
@@ -120,12 +158,16 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       category: input.category,
       validationMode: input.validationMode || 'ONLINE',
       pricingType: input.pricingType || 'FIXED',
+      purchaseType: input.purchaseType || 'SUBSCRIPTION',
       licenseDurationDays: input.licenseDurationDays,
       s3PackageKey: input.s3PackageKey,
       version: input.version,
       features: input.features || [],
       stripeProductId,
       stripePriceId,
+      stripePriceIdAnnual,
+      priceMonthly: input.priceMonthly,
+      priceAnnual: input.priceAnnual,
     },
   });
 }

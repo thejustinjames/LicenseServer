@@ -51,6 +51,13 @@
 See [COMPLETED.md](./COMPLETED.md) for full details on implemented features.
 
 ### Recently Completed
+- [x] **Extended Stripe Integration (2026-03-17)**
+  - [x] One-time payments for perpetual licenses
+  - [x] Monthly/Annual billing intervals
+  - [x] Coupon management (create, list, update, delete)
+  - [x] Promotion codes with restrictions
+  - [x] Promo code validation endpoint
+  - [x] Admin panel coupon/promo code management UI
 - [x] **Authentication & UI Improvements (2026-03-17)**
   - [x] Modern login modal with required authentication
   - [x] Password reset flow (forgot password, email, reset page)

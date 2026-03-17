@@ -21,7 +21,7 @@
 - [x] Checkout session creation with tax support
 - [x] Billing portal integration
 - [x] Comprehensive webhook handlers:
-  - `checkout.session.completed` - License provisioning
+  - `checkout.session.completed` - License provisioning (subscriptions & one-time)
   - `customer.subscription.created/updated/deleted` - Subscription lifecycle
   - `customer.subscription.trial_will_end` - Trial notifications
   - `invoice.payment_failed` - License suspension
@@ -33,10 +33,17 @@
 - [x] Stripe Tax integration (automatic tax calculation)
 - [x] Subscription cancel/reactivate at period end
 - [x] Refund tracking with license revocation
+- [x] **One-time payments for perpetual licenses**
+- [x] **Monthly/Annual billing intervals**
+- [x] **Coupon management**:
+  - Create coupons (percent/amount off, duration, limits)
+  - List/get/update/delete coupons
+  - Promotion codes with restrictions (first-time, minimum amount)
+  - Public promo code validation endpoint
 
 ## Phase 4: APIs
 - [x] Admin API with JWT auth and admin role requirement
-  - Products CRUD
+  - Products CRUD (with purchase type & billing intervals)
   - Licenses CRUD with revoke/suspend/reactivate
   - Customers listing
   - Subscriptions listing
@@ -44,6 +51,8 @@
   - Usage reporting for metered billing
   - Dashboard stats endpoint
   - Tax code management
+  - **Coupon management** (CRUD)
+  - **Promotion code management** (create, list, activate/deactivate)
 - [x] License validation API (`/api/v1/validate`)
 - [x] License activation/deactivation API
 - [x] Customer portal API
@@ -78,6 +87,10 @@
 - [x] Responsive design
 - [x] Favicon (SVG with gradient logo)
 - [x] Admin icon link for admin users
+- [x] **Admin Coupon Management UI**:
+  - Coupons tab (create, list, delete)
+  - Promo codes tab (create, activate/deactivate)
+  - Tab-based interface for easy navigation
 - [x] In-app error messages (no browser alerts)
 - [x] Admin Dashboard (`/admin.html`)
   - Dashboard with stats overview
@@ -216,6 +229,9 @@
 
 | Date | Task | Phase |
 |------|------|-------|
+| 2026-03-17 | Admin coupon/promo code management UI | Phase 3, 6 |
+| 2026-03-17 | One-time payments & billing intervals | Phase 3 |
+| 2026-03-17 | Coupon & promo code API | Phase 3, 4 |
 | 2026-03-17 | AWS hosting documentation | Phase 13 |
 | 2026-03-17 | Required login modal | Phase 13 |
 | 2026-03-17 | CAPTCHA support (hCaptcha) | Phase 13 |
@@ -309,6 +325,12 @@ License Server
 | `/api/portal/auth/reset-password` | POST | No | Reset password |
 | `/api/portal/auth/captcha-config` | GET | No | Get CAPTCHA config |
 | `/api/portal/auth/password-requirements` | GET | No | Get password rules |
+| `/api/portal/billing/validate-promo/:code` | GET | No | Validate promo code |
+| `/api/portal/billing/checkout` | POST | JWT | Create checkout session |
 | `/api/portal/*` | * | JWT | Customer portal |
+| `/api/admin/coupons` | GET/POST | Admin | List/Create coupons |
+| `/api/admin/coupons/:id` | GET/PUT/DELETE | Admin | Get/Update/Delete coupon |
+| `/api/admin/promotion-codes` | GET/POST | Admin | List/Create promo codes |
+| `/api/admin/promotion-codes/:id` | GET/PUT | Admin | Get/Update promo code |
 | `/api/admin/*` | * | JWT+Admin | Admin operations |
 | `/webhooks/stripe` | POST | Stripe sig | Webhook handler |

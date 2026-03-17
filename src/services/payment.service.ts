@@ -42,6 +42,7 @@ export interface CreateCheckoutSessionInput {
   quantity?: number;
   trialPeriodDays?: number;
   promotionCode?: string;
+  billingInterval?: 'monthly' | 'annual';
   metadata?: Record<string, string>;
 }
 
@@ -52,7 +53,15 @@ export async function createCheckoutSession(input: CreateCheckoutSessionInput): 
     throw new Error('Product not found');
   }
 
-  if (!product.stripePriceId) {
+  // Determine the price ID based on billing interval
+  let priceId: string | null = null;
+  if (input.billingInterval === 'annual' && product.stripePriceIdAnnual) {
+    priceId = product.stripePriceIdAnnual;
+  } else {
+    priceId = product.stripePriceId;
+  }
+
+  if (!priceId) {
     throw new Error('Product does not have a Stripe price configured');
   }
 
@@ -63,58 +72,74 @@ export async function createCheckoutSession(input: CreateCheckoutSessionInput): 
     stripeCustomerId = customer?.stripeCustomerId || undefined;
   }
 
-  // Determine if this is a metered product (no quantity for usage-based)
+  // Determine if this is a one-time purchase or subscription
+  const isOneTime = product.purchaseType === 'ONE_TIME';
   const isMetered = product.pricingType === 'METERED';
 
   // Build line items
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
     {
-      price: product.stripePriceId,
+      price: priceId,
       // Don't pass quantity for metered billing
       ...(isMetered ? {} : { quantity: input.quantity || 1 }),
     },
   ];
 
-  // Build subscription data
-  const subscriptionData: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
-    metadata: {
-      productId: product.id,
-      ...input.metadata,
-    },
-  };
-
-  // Add trial period if configured
-  const trialDays = input.trialPeriodDays ||
-    (config.STRIPE_TRIAL_PERIOD_DAYS ? parseInt(config.STRIPE_TRIAL_PERIOD_DAYS, 10) : undefined);
-
-  if (trialDays && trialDays > 0) {
-    subscriptionData.trial_period_days = trialDays;
-  }
-
   // Build session params
   const sessionParams: Stripe.Checkout.SessionCreateParams = {
-    mode: 'subscription',
+    mode: isOneTime ? 'payment' : 'subscription',
     payment_method_types: ['card'],
     line_items: lineItems,
     customer: stripeCustomerId,
     customer_email: stripeCustomerId ? undefined : input.customerEmail,
     success_url: `${input.successUrl || config.STRIPE_SUCCESS_URL}?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: input.cancelUrl || config.STRIPE_CANCEL_URL,
-    subscription_data: subscriptionData,
     billing_address_collection: config.STRIPE_BILLING_ADDRESS_COLLECTION as 'auto' | 'required',
     metadata: {
       productId: product.id,
+      purchaseType: product.purchaseType,
+      billingInterval: input.billingInterval || 'monthly',
     },
   };
+
+  // Add subscription-specific data
+  if (!isOneTime) {
+    const subscriptionData: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
+      metadata: {
+        productId: product.id,
+        ...input.metadata,
+      },
+    };
+
+    // Add trial period if configured (only for subscriptions)
+    const trialDays = input.trialPeriodDays ||
+      (config.STRIPE_TRIAL_PERIOD_DAYS ? parseInt(config.STRIPE_TRIAL_PERIOD_DAYS, 10) : undefined);
+
+    if (trialDays && trialDays > 0) {
+      subscriptionData.trial_period_days = trialDays;
+    }
+
+    sessionParams.subscription_data = subscriptionData;
+  } else {
+    // For one-time payments, add payment intent data
+    sessionParams.payment_intent_data = {
+      metadata: {
+        productId: product.id,
+        ...input.metadata,
+      },
+    };
+  }
 
   // Enable automatic tax if configured
   if (config.STRIPE_TAX_ENABLED === 'true') {
     sessionParams.automatic_tax = { enabled: true };
     // Tax calculation requires customer location
-    sessionParams.customer_update = {
-      address: 'auto',
-      name: 'auto',
-    };
+    if (!isOneTime) {
+      sessionParams.customer_update = {
+        address: 'auto',
+        name: 'auto',
+      };
+    }
   }
 
   // Add promotion code if provided
@@ -169,13 +194,15 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
   const customerEmail = session.customer_details?.email;
   const stripeCustomerId = session.customer as string;
   const productId = session.metadata?.productId;
-  const subscriptionId = session.subscription as string;
+  const purchaseType = session.metadata?.purchaseType || 'SUBSCRIPTION';
+  const subscriptionId = session.subscription as string | null;
 
   if (!customerEmail || !productId) {
     console.error('Missing customer email or product ID in checkout session');
     return;
   }
 
+  // Find or create customer
   let customer = await prisma.customer.findUnique({
     where: { stripeCustomerId },
   });
@@ -214,37 +241,53 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
     return;
   }
 
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  // Handle subscription purchases
+  if (purchaseType === 'SUBSCRIPTION' && subscriptionId) {
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-  await prisma.subscription.upsert({
-    where: { stripeSubscriptionId: subscriptionId },
-    create: {
-      customerId: customer.id,
-      stripeSubscriptionId: subscriptionId,
-      status: 'ACTIVE',
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    },
-    update: {
-      status: 'ACTIVE',
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    },
-  });
+    await prisma.subscription.upsert({
+      where: { stripeSubscriptionId: subscriptionId },
+      create: {
+        customerId: customer.id,
+        stripeSubscriptionId: subscriptionId,
+        status: 'ACTIVE',
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+      update: {
+        status: 'ACTIVE',
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+    });
+  }
 
+  // Calculate license expiration
   let expiresAt: Date | undefined;
   if (product.licenseDurationDays) {
     expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + product.licenseDurationDays);
+  } else if (purchaseType === 'ONE_TIME') {
+    // One-time purchases get perpetual licenses (no expiration) unless duration is set
+    expiresAt = undefined;
   }
 
-  await licenseService.createLicense({
+  // Create license for the customer
+  const license = await licenseService.createLicense({
     customerId: customer.id,
     productId: product.id,
     expiresAt,
   });
+
+  // Send license activated email
+  await emailService.sendLicenseActivatedEmail(
+    customer.email,
+    customer.name || undefined,
+    product.name,
+    license.key
+  );
 }
 
 export async function handleSubscriptionUpdated(subscription: Stripe.Subscription): Promise<void> {
@@ -784,5 +827,226 @@ function mapStripeStatus(status: Stripe.Subscription.Status): 'ACTIVE' | 'CANCEL
       return 'PAST_DUE';
     default:
       return 'PAST_DUE';
+  }
+}
+
+// ============================================================================
+// COUPON & PROMOTION CODE MANAGEMENT
+// ============================================================================
+
+export interface CreateCouponInput {
+  name: string;
+  percentOff?: number;
+  amountOff?: number;
+  currency?: string;
+  duration: 'once' | 'repeating' | 'forever';
+  durationInMonths?: number;
+  maxRedemptions?: number;
+  redeemBy?: Date;
+  appliesTo?: string[]; // Product IDs
+}
+
+export interface CreatePromotionCodeInput {
+  couponId: string;
+  code: string;
+  maxRedemptions?: number;
+  expiresAt?: Date;
+  firstTimeTransaction?: boolean;
+  minimumAmount?: number;
+  minimumAmountCurrency?: string;
+}
+
+/**
+ * Create a new coupon in Stripe
+ */
+export async function createCoupon(input: CreateCouponInput): Promise<Stripe.Coupon> {
+  const idempotencyKey = generateIdempotencyKey('coupon', input.name);
+
+  const params: Stripe.CouponCreateParams = {
+    name: input.name,
+    duration: input.duration,
+  };
+
+  if (input.percentOff) {
+    params.percent_off = input.percentOff;
+  } else if (input.amountOff) {
+    params.amount_off = input.amountOff;
+    params.currency = input.currency || 'usd';
+  }
+
+  if (input.duration === 'repeating' && input.durationInMonths) {
+    params.duration_in_months = input.durationInMonths;
+  }
+
+  if (input.maxRedemptions) {
+    params.max_redemptions = input.maxRedemptions;
+  }
+
+  if (input.redeemBy) {
+    params.redeem_by = Math.floor(input.redeemBy.getTime() / 1000);
+  }
+
+  if (input.appliesTo && input.appliesTo.length > 0) {
+    // Get Stripe product IDs from our product IDs
+    const products = await prisma.product.findMany({
+      where: { id: { in: input.appliesTo } },
+      select: { stripeProductId: true },
+    });
+    const stripeProductIds = products
+      .map(p => p.stripeProductId)
+      .filter((id): id is string => id !== null);
+
+    if (stripeProductIds.length > 0) {
+      params.applies_to = { products: stripeProductIds };
+    }
+  }
+
+  return stripe.coupons.create(params, { idempotencyKey });
+}
+
+/**
+ * Create a promotion code for a coupon (the code customers actually enter)
+ */
+export async function createPromotionCode(input: CreatePromotionCodeInput): Promise<Stripe.PromotionCode> {
+  const idempotencyKey = generateIdempotencyKey('promo', input.code);
+
+  const params: Stripe.PromotionCodeCreateParams = {
+    coupon: input.couponId,
+    code: input.code,
+  };
+
+  if (input.maxRedemptions) {
+    params.max_redemptions = input.maxRedemptions;
+  }
+
+  if (input.expiresAt) {
+    params.expires_at = Math.floor(input.expiresAt.getTime() / 1000);
+  }
+
+  if (input.firstTimeTransaction) {
+    params.restrictions = {
+      ...params.restrictions,
+      first_time_transaction: true,
+    };
+  }
+
+  if (input.minimumAmount) {
+    params.restrictions = {
+      ...params.restrictions,
+      minimum_amount: input.minimumAmount,
+      minimum_amount_currency: input.minimumAmountCurrency || 'usd',
+    };
+  }
+
+  return stripe.promotionCodes.create(params, { idempotencyKey });
+}
+
+/**
+ * List all coupons
+ */
+export async function listCoupons(options?: {
+  limit?: number;
+  startingAfter?: string;
+}): Promise<Stripe.ApiList<Stripe.Coupon>> {
+  return stripe.coupons.list({
+    limit: options?.limit || 20,
+    starting_after: options?.startingAfter,
+  });
+}
+
+/**
+ * Get a coupon by ID
+ */
+export async function getCoupon(couponId: string): Promise<Stripe.Coupon> {
+  return stripe.coupons.retrieve(couponId);
+}
+
+/**
+ * Update a coupon (only name and metadata can be updated)
+ */
+export async function updateCoupon(couponId: string, data: {
+  name?: string;
+  metadata?: Record<string, string>;
+}): Promise<Stripe.Coupon> {
+  const idempotencyKey = generateIdempotencyKey('update-coupon', couponId);
+  return stripe.coupons.update(couponId, data, { idempotencyKey });
+}
+
+/**
+ * Delete a coupon
+ */
+export async function deleteCoupon(couponId: string): Promise<Stripe.DeletedCoupon> {
+  return stripe.coupons.del(couponId);
+}
+
+/**
+ * List all promotion codes
+ */
+export async function listPromotionCodes(options?: {
+  couponId?: string;
+  active?: boolean;
+  limit?: number;
+  startingAfter?: string;
+}): Promise<Stripe.ApiList<Stripe.PromotionCode>> {
+  return stripe.promotionCodes.list({
+    coupon: options?.couponId,
+    active: options?.active,
+    limit: options?.limit || 20,
+    starting_after: options?.startingAfter,
+  });
+}
+
+/**
+ * Get a promotion code by ID
+ */
+export async function getPromotionCode(promoCodeId: string): Promise<Stripe.PromotionCode> {
+  return stripe.promotionCodes.retrieve(promoCodeId);
+}
+
+/**
+ * Update a promotion code (can deactivate)
+ */
+export async function updatePromotionCode(promoCodeId: string, data: {
+  active?: boolean;
+  metadata?: Record<string, string>;
+}): Promise<Stripe.PromotionCode> {
+  const idempotencyKey = generateIdempotencyKey('update-promo', promoCodeId);
+  return stripe.promotionCodes.update(promoCodeId, data, { idempotencyKey });
+}
+
+/**
+ * Validate a promotion code
+ */
+export async function validatePromotionCode(code: string): Promise<{
+  valid: boolean;
+  promotionCode?: Stripe.PromotionCode;
+  error?: string;
+}> {
+  try {
+    const promoCodes = await stripe.promotionCodes.list({
+      code,
+      active: true,
+      limit: 1,
+    });
+
+    if (promoCodes.data.length === 0) {
+      return { valid: false, error: 'Invalid or expired promotion code' };
+    }
+
+    const promoCode = promoCodes.data[0];
+
+    // Check if expired
+    if (promoCode.expires_at && promoCode.expires_at < Date.now() / 1000) {
+      return { valid: false, error: 'Promotion code has expired' };
+    }
+
+    // Check redemption limit
+    if (promoCode.max_redemptions && promoCode.times_redeemed >= promoCode.max_redemptions) {
+      return { valid: false, error: 'Promotion code has reached its redemption limit' };
+    }
+
+    return { valid: true, promotionCode: promoCode };
+  } catch (error) {
+    return { valid: false, error: 'Failed to validate promotion code' };
   }
 }

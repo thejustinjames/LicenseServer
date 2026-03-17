@@ -6,6 +6,7 @@ var adminUser = JSON.parse(localStorage.getItem('adminUser') || 'null');
 var products = [];
 var customers = [];
 var categories = [];
+var coupons = [];
 var productSearchTimeout = null;
 
 // Initialize
@@ -127,8 +128,80 @@ function bindEvents() {
       case 'reactivate-license':
         reactivateLicense(id);
         break;
+      case 'delete-coupon':
+        deleteCoupon(id);
+        break;
+      case 'deactivate-promo':
+        deactivatePromoCode(id);
+        break;
+      case 'activate-promo':
+        activatePromoCode(id);
+        break;
     }
   });
+
+  // Coupon modal
+  document.getElementById('addCouponBtn').addEventListener('click', openCouponModal);
+  document.getElementById('closeCouponModal').addEventListener('click', closeCouponModal);
+  document.getElementById('cancelCouponBtn').addEventListener('click', closeCouponModal);
+  document.getElementById('couponForm').addEventListener('submit', handleCouponSubmit);
+  document.getElementById('couponModal').addEventListener('click', function(e) {
+    if (e.target === this) closeCouponModal();
+  });
+
+  // Coupon form dynamic fields
+  document.getElementById('discountType').addEventListener('change', function() {
+    var hint = document.getElementById('discountHint');
+    var currencyGroup = document.getElementById('currencyGroup');
+    if (this.value === 'percent') {
+      hint.textContent = 'Percentage (1-100)';
+      currencyGroup.style.display = 'none';
+    } else {
+      hint.textContent = 'Amount in cents (e.g., 500 = $5.00)';
+      currencyGroup.style.display = 'block';
+    }
+  });
+
+  document.getElementById('couponDuration').addEventListener('change', function() {
+    var monthsGroup = document.getElementById('durationMonthsGroup');
+    monthsGroup.style.display = this.value === 'repeating' ? 'block' : 'none';
+  });
+
+  // Promo code modal
+  document.getElementById('addPromoCodeBtn').addEventListener('click', openPromoCodeModal);
+  document.getElementById('closePromoCodeModal').addEventListener('click', closePromoCodeModal);
+  document.getElementById('cancelPromoCodeBtn').addEventListener('click', closePromoCodeModal);
+  document.getElementById('promoCodeForm').addEventListener('submit', handlePromoCodeSubmit);
+  document.getElementById('promoCodeModal').addEventListener('click', function(e) {
+    if (e.target === this) closePromoCodeModal();
+  });
+
+  // Promo code uppercase
+  document.getElementById('promoCode').addEventListener('input', function() {
+    this.value = this.value.toUpperCase();
+  });
+
+  // Tab switching
+  var tabBtns = document.querySelectorAll('.tab-btn');
+  for (var i = 0; i < tabBtns.length; i++) {
+    tabBtns[i].addEventListener('click', function() {
+      var tabId = this.getAttribute('data-tab');
+
+      // Update buttons
+      var allBtns = document.querySelectorAll('.tab-btn');
+      for (var j = 0; j < allBtns.length; j++) {
+        allBtns[j].classList.remove('active');
+      }
+      this.classList.add('active');
+
+      // Update content
+      var allContent = document.querySelectorAll('.tab-content');
+      for (var k = 0; k < allContent.length; k++) {
+        allContent[k].classList.remove('active');
+      }
+      document.getElementById(tabId).classList.add('active');
+    });
+  }
 }
 
 // API Helper
@@ -248,6 +321,10 @@ function loadSectionData(section) {
       break;
     case 'refunds':
       loadRefunds();
+      break;
+    case 'coupons':
+      loadCoupons();
+      loadPromoCodes();
       break;
   }
 }
@@ -682,4 +759,272 @@ function formatDate(dateStr) {
   if (!dateStr) return '-';
   var date = new Date(dateStr);
   return date.toLocaleDateString();
+}
+
+// ============================================================================
+// COUPONS
+// ============================================================================
+
+function loadCoupons() {
+  api('/api/admin/coupons')
+    .then(function(response) {
+      coupons = response.data || [];
+      var tbody = document.getElementById('couponsTable');
+
+      if (coupons.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b;">No coupons yet. Create one to get started!</td></tr>';
+        return;
+      }
+
+      var html = '';
+      for (var i = 0; i < coupons.length; i++) {
+        var coupon = coupons[i];
+        var discount = coupon.percent_off
+          ? coupon.percent_off + '% off'
+          : formatCurrency(coupon.amount_off, coupon.currency) + ' off';
+
+        var duration = coupon.duration;
+        if (coupon.duration === 'repeating') {
+          duration = coupon.duration_in_months + ' months';
+        }
+
+        var redeemed = coupon.times_redeemed || 0;
+        if (coupon.max_redemptions) {
+          redeemed += ' / ' + coupon.max_redemptions;
+        }
+
+        var expires = coupon.redeem_by ? formatDate(new Date(coupon.redeem_by * 1000)) : 'Never';
+
+        html += '<tr>';
+        html += '<td><strong>' + escapeHtml(coupon.name || coupon.id) + '</strong></td>';
+        html += '<td><span class="feature-tag">' + discount + '</span></td>';
+        html += '<td>' + duration + '</td>';
+        html += '<td>' + redeemed + '</td>';
+        html += '<td>' + expires + '</td>';
+        html += '<td class="actions">';
+        html += '<button class="btn btn-danger btn-sm action-btn" data-action="delete-coupon" data-id="' + escapeHtml(coupon.id) + '">Delete</button>';
+        html += '</td>';
+        html += '</tr>';
+      }
+      tbody.innerHTML = html;
+    })
+    .catch(function(error) {
+      console.error('Failed to load coupons:', error);
+      document.getElementById('couponsTable').innerHTML = '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load coupons. Check Stripe configuration.</td></tr>';
+    });
+}
+
+function loadPromoCodes() {
+  api('/api/admin/promotion-codes')
+    .then(function(response) {
+      var promoCodes = response.data || [];
+      var tbody = document.getElementById('promoCodesTable');
+
+      if (promoCodes.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b;">No promo codes yet. Create a coupon first, then add codes.</td></tr>';
+        return;
+      }
+
+      var html = '';
+      for (var i = 0; i < promoCodes.length; i++) {
+        var promo = promoCodes[i];
+        var redeemed = promo.times_redeemed || 0;
+        var maxUses = promo.max_redemptions || 'Unlimited';
+        var status = promo.active ? 'Active' : 'Inactive';
+        var statusClass = promo.active ? 'status-active' : 'status-suspended';
+
+        html += '<tr>';
+        html += '<td><code style="font-weight: 600; background: #fef3c7; padding: 0.25rem 0.5rem; border-radius: 4px;">' + escapeHtml(promo.code) + '</code></td>';
+        html += '<td>' + escapeHtml(promo.coupon.name || promo.coupon.id) + '</td>';
+        html += '<td>' + redeemed + '</td>';
+        html += '<td>' + maxUses + '</td>';
+        html += '<td><span class="status-badge ' + statusClass + '">' + status + '</span></td>';
+        html += '<td class="actions">';
+        if (promo.active) {
+          html += '<button class="btn btn-secondary btn-sm action-btn" data-action="deactivate-promo" data-id="' + escapeHtml(promo.id) + '">Deactivate</button>';
+        } else {
+          html += '<button class="btn btn-success btn-sm action-btn" data-action="activate-promo" data-id="' + escapeHtml(promo.id) + '">Activate</button>';
+        }
+        html += '</td>';
+        html += '</tr>';
+      }
+      tbody.innerHTML = html;
+    })
+    .catch(function(error) {
+      console.error('Failed to load promo codes:', error);
+      document.getElementById('promoCodesTable').innerHTML = '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load promo codes.</td></tr>';
+    });
+}
+
+// Coupon Modal
+function openCouponModal() {
+  document.getElementById('couponModal').classList.add('active');
+  document.getElementById('couponForm').reset();
+  document.getElementById('currencyGroup').style.display = 'none';
+  document.getElementById('durationMonthsGroup').style.display = 'none';
+  document.getElementById('discountHint').textContent = 'Percentage (1-100)';
+}
+
+function closeCouponModal() {
+  document.getElementById('couponModal').classList.remove('active');
+}
+
+function handleCouponSubmit(e) {
+  e.preventDefault();
+
+  var discountType = document.getElementById('discountType').value;
+  var discountValue = parseInt(document.getElementById('discountValue').value);
+
+  var data = {
+    name: document.getElementById('couponName').value,
+    duration: document.getElementById('couponDuration').value
+  };
+
+  if (discountType === 'percent') {
+    data.percentOff = discountValue;
+  } else {
+    data.amountOff = discountValue;
+    data.currency = document.getElementById('couponCurrency').value;
+  }
+
+  if (data.duration === 'repeating') {
+    data.durationInMonths = parseInt(document.getElementById('durationMonths').value);
+  }
+
+  var maxRedemptions = document.getElementById('couponMaxRedemptions').value;
+  if (maxRedemptions) {
+    data.maxRedemptions = parseInt(maxRedemptions);
+  }
+
+  var redeemBy = document.getElementById('couponRedeemBy').value;
+  if (redeemBy) {
+    data.redeemBy = new Date(redeemBy).toISOString();
+  }
+
+  api('/api/admin/coupons', { method: 'POST', body: JSON.stringify(data) })
+    .then(function(coupon) {
+      closeCouponModal();
+      loadCoupons();
+      alert('Coupon created: ' + (coupon.name || coupon.id));
+    })
+    .catch(function(error) {
+      alert('Failed to create coupon: ' + error.message);
+    });
+}
+
+function deleteCoupon(id) {
+  if (!confirm('Delete this coupon? This will also invalidate any promo codes using it.')) return;
+
+  api('/api/admin/coupons/' + id, { method: 'DELETE' })
+    .then(function() {
+      loadCoupons();
+      loadPromoCodes();
+    })
+    .catch(function(error) {
+      alert('Failed to delete coupon: ' + error.message);
+    });
+}
+
+// Promo Code Modal
+function openPromoCodeModal() {
+  document.getElementById('promoCodeModal').classList.add('active');
+  document.getElementById('promoCodeForm').reset();
+
+  // Populate coupons dropdown
+  var select = document.getElementById('promoCodeCoupon');
+  select.innerHTML = '<option value="">Select a coupon...</option>';
+
+  if (coupons.length === 0) {
+    // Load coupons first
+    api('/api/admin/coupons')
+      .then(function(response) {
+        coupons = response.data || [];
+        populateCouponsDropdown();
+      });
+  } else {
+    populateCouponsDropdown();
+  }
+}
+
+function populateCouponsDropdown() {
+  var select = document.getElementById('promoCodeCoupon');
+  select.innerHTML = '<option value="">Select a coupon...</option>';
+  for (var i = 0; i < coupons.length; i++) {
+    var c = coupons[i];
+    var label = c.name || c.id;
+    var discount = c.percent_off ? c.percent_off + '% off' : formatCurrency(c.amount_off, c.currency) + ' off';
+    select.innerHTML += '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(label) + ' (' + discount + ')</option>';
+  }
+}
+
+function closePromoCodeModal() {
+  document.getElementById('promoCodeModal').classList.remove('active');
+}
+
+function handlePromoCodeSubmit(e) {
+  e.preventDefault();
+
+  var data = {
+    couponId: document.getElementById('promoCodeCoupon').value,
+    code: document.getElementById('promoCode').value.toUpperCase()
+  };
+
+  var maxRedemptions = document.getElementById('promoMaxRedemptions').value;
+  if (maxRedemptions) {
+    data.maxRedemptions = parseInt(maxRedemptions);
+  }
+
+  var expiresAt = document.getElementById('promoExpiresAt').value;
+  if (expiresAt) {
+    data.expiresAt = new Date(expiresAt).toISOString();
+  }
+
+  if (document.getElementById('promoFirstTimeOnly').checked) {
+    data.firstTimeTransaction = true;
+  }
+
+  var minAmount = document.getElementById('promoMinAmount').value;
+  if (minAmount) {
+    data.minimumAmount = parseInt(minAmount);
+    data.minimumAmountCurrency = document.getElementById('promoMinCurrency').value;
+  }
+
+  api('/api/admin/promotion-codes', { method: 'POST', body: JSON.stringify(data) })
+    .then(function(promo) {
+      closePromoCodeModal();
+      loadPromoCodes();
+      alert('Promo code created: ' + promo.code);
+    })
+    .catch(function(error) {
+      alert('Failed to create promo code: ' + error.message);
+    });
+}
+
+function deactivatePromoCode(id) {
+  if (!confirm('Deactivate this promo code? Customers will no longer be able to use it.')) return;
+
+  api('/api/admin/promotion-codes/' + id, { method: 'PUT', body: JSON.stringify({ active: false }) })
+    .then(function() {
+      loadPromoCodes();
+    })
+    .catch(function(error) {
+      alert('Failed to deactivate: ' + error.message);
+    });
+}
+
+function activatePromoCode(id) {
+  api('/api/admin/promotion-codes/' + id, { method: 'PUT', body: JSON.stringify({ active: true }) })
+    .then(function() {
+      loadPromoCodes();
+    })
+    .catch(function(error) {
+      alert('Failed to activate: ' + error.message);
+    });
+}
+
+function formatCurrency(amount, currency) {
+  if (!amount) return '$0.00';
+  var value = (amount / 100).toFixed(2);
+  var symbols = { usd: '$', eur: '€', gbp: '£' };
+  return (symbols[currency] || '$') + value;
 }

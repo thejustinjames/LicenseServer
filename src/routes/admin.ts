@@ -21,14 +21,21 @@ const createProductSchema = z.object({
   category: z.string().optional(),
   validationMode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']).optional(),
   pricingType: z.enum(['FIXED', 'METERED']).optional(),
+  purchaseType: z.enum(['SUBSCRIPTION', 'ONE_TIME']).optional(),
   licenseDurationDays: z.number().positive().optional(),
   s3PackageKey: z.string().optional(),
   version: z.string().optional(),
   features: z.array(z.string()).optional(),
   createStripeProduct: z.boolean().optional(),
+  // Monthly price in cents
   stripePriceAmount: z.number().positive().optional(),
   stripePriceCurrency: z.string().optional(),
   stripePriceInterval: z.enum(['month', 'year']).optional(),
+  // Annual price in cents (for subscriptions)
+  stripePriceAmountAnnual: z.number().positive().optional(),
+  // Local display prices (in cents)
+  priceMonthly: z.number().nonnegative().optional(),
+  priceAnnual: z.number().nonnegative().optional(),
   // Metered billing options
   meteredUsageType: z.enum(['licensed', 'metered', 'aggregated']).optional(),
   meteredAggregateUsage: z.enum(['sum', 'last_during_period', 'last_ever', 'max']).optional(),
@@ -42,10 +49,14 @@ const updateProductSchema = z.object({
   description: z.string().optional(),
   category: z.string().nullable().optional(),
   validationMode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']).optional(),
+  pricingType: z.enum(['FIXED', 'METERED']).optional(),
+  purchaseType: z.enum(['SUBSCRIPTION', 'ONE_TIME']).optional(),
   licenseDurationDays: z.number().positive().nullable().optional(),
   s3PackageKey: z.string().optional(),
   version: z.string().optional(),
   features: z.array(z.string()).optional(),
+  priceMonthly: z.number().nonnegative().nullable().optional(),
+  priceAnnual: z.number().nonnegative().nullable().optional(),
 });
 
 // License schemas
@@ -567,6 +578,193 @@ router.get('/refunds', async (req: AuthenticatedRequest, res: Response) => {
   } catch (error) {
     console.error('List refunds error:', error);
     res.status(500).json({ error: 'Failed to list refunds' });
+  }
+});
+
+// ============================================================================
+// COUPONS & PROMOTION CODES
+// ============================================================================
+
+// Create a coupon
+router.post('/coupons', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const createCouponSchema = z.object({
+      name: z.string().min(1),
+      percentOff: z.number().min(1).max(100).optional(),
+      amountOff: z.number().positive().optional(),
+      currency: z.string().optional(),
+      duration: z.enum(['once', 'repeating', 'forever']),
+      durationInMonths: z.number().positive().optional(),
+      maxRedemptions: z.number().positive().optional(),
+      redeemBy: z.string().datetime().optional(),
+      appliesTo: z.array(z.string()).optional(),
+    }).refine(
+      data => data.percentOff || data.amountOff,
+      { message: 'Either percentOff or amountOff must be provided' }
+    );
+
+    const data = createCouponSchema.parse(req.body);
+
+    const coupon = await paymentService.createCoupon({
+      ...data,
+      redeemBy: data.redeemBy ? new Date(data.redeemBy) : undefined,
+    });
+
+    res.status(201).json(coupon);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Create coupon error:', error);
+    res.status(500).json({ error: 'Failed to create coupon' });
+  }
+});
+
+// List coupons
+router.get('/coupons', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const coupons = await paymentService.listCoupons({
+      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+      startingAfter: req.query.startingAfter as string | undefined,
+    });
+    res.json(coupons);
+  } catch (error) {
+    console.error('List coupons error:', error);
+    res.status(500).json({ error: 'Failed to list coupons' });
+  }
+});
+
+// Get coupon by ID
+router.get('/coupons/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const coupon = await paymentService.getCoupon(req.params.id);
+    res.json(coupon);
+  } catch (error) {
+    console.error('Get coupon error:', error);
+    res.status(500).json({ error: 'Failed to get coupon' });
+  }
+});
+
+// Update coupon
+router.put('/coupons/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const updateCouponSchema = z.object({
+      name: z.string().min(1).optional(),
+      metadata: z.record(z.string()).optional(),
+    });
+
+    const data = updateCouponSchema.parse(req.body);
+    const coupon = await paymentService.updateCoupon(req.params.id, data);
+    res.json(coupon);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Update coupon error:', error);
+    res.status(500).json({ error: 'Failed to update coupon' });
+  }
+});
+
+// Delete coupon
+router.delete('/coupons/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await paymentService.deleteCoupon(req.params.id);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Delete coupon error:', error);
+    res.status(500).json({ error: 'Failed to delete coupon' });
+  }
+});
+
+// Create promotion code
+router.post('/promotion-codes', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const createPromoCodeSchema = z.object({
+      couponId: z.string().min(1),
+      code: z.string().min(3).max(50).regex(/^[A-Z0-9_-]+$/i, 'Code must contain only letters, numbers, underscores, and hyphens'),
+      maxRedemptions: z.number().positive().optional(),
+      expiresAt: z.string().datetime().optional(),
+      firstTimeTransaction: z.boolean().optional(),
+      minimumAmount: z.number().positive().optional(),
+      minimumAmountCurrency: z.string().optional(),
+    });
+
+    const data = createPromoCodeSchema.parse(req.body);
+
+    const promoCode = await paymentService.createPromotionCode({
+      ...data,
+      expiresAt: data.expiresAt ? new Date(data.expiresAt) : undefined,
+    });
+
+    res.status(201).json(promoCode);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Create promotion code error:', error);
+    res.status(500).json({ error: 'Failed to create promotion code' });
+  }
+});
+
+// List promotion codes
+router.get('/promotion-codes', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const promoCodes = await paymentService.listPromotionCodes({
+      couponId: req.query.couponId as string | undefined,
+      active: req.query.active === 'true' ? true : req.query.active === 'false' ? false : undefined,
+      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+      startingAfter: req.query.startingAfter as string | undefined,
+    });
+    res.json(promoCodes);
+  } catch (error) {
+    console.error('List promotion codes error:', error);
+    res.status(500).json({ error: 'Failed to list promotion codes' });
+  }
+});
+
+// Get promotion code by ID
+router.get('/promotion-codes/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const promoCode = await paymentService.getPromotionCode(req.params.id);
+    res.json(promoCode);
+  } catch (error) {
+    console.error('Get promotion code error:', error);
+    res.status(500).json({ error: 'Failed to get promotion code' });
+  }
+});
+
+// Update promotion code (activate/deactivate)
+router.put('/promotion-codes/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const updatePromoCodeSchema = z.object({
+      active: z.boolean().optional(),
+      metadata: z.record(z.string()).optional(),
+    });
+
+    const data = updatePromoCodeSchema.parse(req.body);
+    const promoCode = await paymentService.updatePromotionCode(req.params.id, data);
+    res.json(promoCode);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Update promotion code error:', error);
+    res.status(500).json({ error: 'Failed to update promotion code' });
+  }
+});
+
+// Validate a promotion code (public endpoint check)
+router.get('/promotion-codes/validate/:code', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await paymentService.validatePromotionCode(req.params.code);
+    res.json(result);
+  } catch (error) {
+    console.error('Validate promotion code error:', error);
+    res.status(500).json({ error: 'Failed to validate promotion code' });
   }
 });
 

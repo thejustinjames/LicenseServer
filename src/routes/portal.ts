@@ -29,7 +29,11 @@ router.get('/products', async (req, res: Response) => {
       category: p.category,
       features: p.features,
       pricingType: p.pricingType,
+      purchaseType: p.purchaseType,
       hasStripePrice: !!p.stripePriceId,
+      hasAnnualPrice: !!p.stripePriceIdAnnual,
+      priceMonthly: p.priceMonthly,
+      priceAnnual: p.priceAnnual,
     }));
     res.json(publicProducts);
   } catch (error) {
@@ -374,6 +378,34 @@ router.get('/downloads/:productId', authenticate, async (req: AuthenticatedReque
   }
 });
 
+// Validate promotion code (public endpoint)
+router.get('/billing/validate-promo/:code', async (req, res: Response) => {
+  try {
+    const result = await paymentService.validatePromotionCode(req.params.code);
+    if (!result.valid) {
+      res.status(400).json({ valid: false, error: result.error });
+      return;
+    }
+
+    // Return sanitized promo code info
+    const promoCode = result.promotionCode!;
+    res.json({
+      valid: true,
+      code: promoCode.code,
+      coupon: {
+        name: promoCode.coupon.name,
+        percentOff: promoCode.coupon.percent_off,
+        amountOff: promoCode.coupon.amount_off,
+        currency: promoCode.coupon.currency,
+        duration: promoCode.coupon.duration,
+      },
+    });
+  } catch (error) {
+    console.error('Validate promo code error:', error);
+    res.status(500).json({ error: 'Failed to validate promotion code' });
+  }
+});
+
 router.post('/billing/checkout', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -385,6 +417,8 @@ router.post('/billing/checkout', authenticate, async (req: AuthenticatedRequest,
       productId: z.string().uuid(),
       successUrl: z.string().url().optional(),
       cancelUrl: z.string().url().optional(),
+      billingInterval: z.enum(['monthly', 'annual']).optional(),
+      promotionCode: z.string().optional(),
     });
 
     const data = checkoutSchema.parse(req.body);
@@ -393,6 +427,8 @@ router.post('/billing/checkout', authenticate, async (req: AuthenticatedRequest,
       customerId: req.user.id,
       successUrl: data.successUrl,
       cancelUrl: data.cancelUrl,
+      billingInterval: data.billingInterval,
+      promotionCode: data.promotionCode,
     });
 
     res.json({ url });

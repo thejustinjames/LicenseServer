@@ -71,6 +71,15 @@
           </svg>
           Refunds
         </a>
+        <a href="#" class="sidebar-link" data-section="coupons">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6"></path>
+            <path d="M12 12V3"></path>
+            <path d="M20 6l-8 6-8-6"></path>
+            <circle cx="12" cy="12" r="2"></circle>
+          </svg>
+          Coupons
+        </a>
       </nav>
     </aside>
 
@@ -261,6 +270,62 @@
           </table>
         </div>
       </section>
+
+      <!-- Coupons Section -->
+      <section id="coupons" class="admin-section">
+        <div class="section-header">
+          <h1>Coupons & Promo Codes</h1>
+          <div class="header-actions">
+            <button class="btn btn-secondary" id="addPromoCodeBtn">+ Promo Code</button>
+            <button class="btn btn-primary" id="addCouponBtn">+ Create Coupon</button>
+          </div>
+        </div>
+
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="coupons-tab">Coupons</button>
+          <button class="tab-btn" data-tab="promocodes-tab">Promo Codes</button>
+        </div>
+
+        <div id="coupons-tab" class="tab-content active">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Discount</th>
+                  <th>Duration</th>
+                  <th>Redeemed</th>
+                  <th>Expires</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="couponsTable">
+                <tr><td colspan="6" class="loading">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="promocodes-tab" class="tab-content">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Coupon</th>
+                  <th>Redeemed</th>
+                  <th>Max Uses</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="promoCodesTable">
+                <tr><td colspan="6" class="loading">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -414,6 +479,140 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" id="cancelLicenseBtn">Cancel</button>
           <button type="submit" class="btn btn-primary">Create License</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Coupon Modal -->
+  <div class="modal" id="couponModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Create Coupon</h2>
+        <button class="modal-close" id="closeCouponModal">&times;</button>
+      </div>
+      <form id="couponForm">
+        <div class="form-group">
+          <label for="couponName">Coupon Name *</label>
+          <input type="text" id="couponName" required placeholder="e.g., Summer Sale 20%">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="discountType">Discount Type *</label>
+            <select id="discountType" required>
+              <option value="percent">Percentage Off</option>
+              <option value="amount">Fixed Amount Off</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="discountValue">Discount Value *</label>
+            <input type="number" id="discountValue" min="1" required placeholder="e.g., 20">
+            <small id="discountHint">Percentage (1-100)</small>
+          </div>
+        </div>
+
+        <div class="form-group" id="currencyGroup" style="display: none;">
+          <label for="couponCurrency">Currency</label>
+          <select id="couponCurrency">
+            <option value="usd">USD</option>
+            <option value="eur">EUR</option>
+            <option value="gbp">GBP</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="couponDuration">Duration *</label>
+            <select id="couponDuration" required>
+              <option value="once">Once (single purchase)</option>
+              <option value="repeating">Repeating (multiple months)</option>
+              <option value="forever">Forever (all future invoices)</option>
+            </select>
+          </div>
+          <div class="form-group" id="durationMonthsGroup" style="display: none;">
+            <label for="durationMonths">Duration (months)</label>
+            <input type="number" id="durationMonths" min="1" max="36" placeholder="e.g., 3">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="couponMaxRedemptions">Max Redemptions (optional)</label>
+            <input type="number" id="couponMaxRedemptions" min="1" placeholder="Leave empty for unlimited">
+          </div>
+          <div class="form-group">
+            <label for="couponRedeemBy">Expires On (optional)</label>
+            <input type="datetime-local" id="couponRedeemBy">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelCouponBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Coupon</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Promo Code Modal -->
+  <div class="modal" id="promoCodeModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Create Promo Code</h2>
+        <button class="modal-close" id="closePromoCodeModal">&times;</button>
+      </div>
+      <form id="promoCodeForm">
+        <div class="form-group">
+          <label for="promoCodeCoupon">Coupon *</label>
+          <select id="promoCodeCoupon" required>
+            <option value="">Select a coupon...</option>
+          </select>
+          <small>The discount to apply when this code is used</small>
+        </div>
+
+        <div class="form-group">
+          <label for="promoCode">Promo Code *</label>
+          <input type="text" id="promoCode" required placeholder="e.g., SUMMER2026" pattern="[A-Za-z0-9_-]+" style="text-transform: uppercase;">
+          <small>Letters, numbers, hyphens, underscores only</small>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="promoMaxRedemptions">Max Redemptions (optional)</label>
+            <input type="number" id="promoMaxRedemptions" min="1" placeholder="Unlimited">
+          </div>
+          <div class="form-group">
+            <label for="promoExpiresAt">Expires On (optional)</label>
+            <input type="datetime-local" id="promoExpiresAt">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="promoFirstTimeOnly">
+            First-time customers only
+          </label>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="promoMinAmount">Minimum Order (cents, optional)</label>
+            <input type="number" id="promoMinAmount" min="0" placeholder="e.g., 1000 = $10">
+          </div>
+          <div class="form-group">
+            <label for="promoMinCurrency">Currency</label>
+            <select id="promoMinCurrency">
+              <option value="usd">USD</option>
+              <option value="eur">EUR</option>
+              <option value="gbp">GBP</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelPromoCodeBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Promo Code</button>
         </div>
       </form>
     </div>

@@ -6,16 +6,19 @@ A Lemon Squeezy-style license server with Stripe payments, license key managemen
 
 - **License Management**: Generate, validate, activate, and revoke license keys
 - **Machine Fingerprinting**: Limit activations per license to prevent sharing
-- **Stripe Integration**: Subscription payments with automatic license provisioning
+- **Stripe Integration**: Subscriptions & one-time payments with automatic license provisioning
+- **Coupon & Promo Codes**: Create discount coupons and shareable promo codes
+- **Monthly/Annual Billing**: Support for different billing intervals
 - **Customer Portal**: Self-service license management and downloads
-- **Admin Dashboard**: Full product and license management UI (`/admin.html`)
+- **Admin Dashboard**: Full product, license, and coupon management UI (`/admin.html`)
 - **Product Categories**: Organize products with categories, search, and filtering
-- **Admin API**: Full product and license CRUD operations
+- **Admin API**: Full product, license, and coupon CRUD operations
 - **S3 Downloads**: Signed URLs for secure software distribution (4-hour expiry)
 - **MinIO Support**: S3-compatible storage for local development
 - **Offline Licensing**: RSA-signed tokens for offline validation
 - **Email Notifications**: Microsoft Graph / Office 365 integration
 - **Rate Limiting**: Protection against brute-force attacks
+- **Security Hardened**: httpOnly cookies, token revocation, Redis rate limiting
 
 ## Tech Stack
 

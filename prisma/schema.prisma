@@ -31,6 +31,11 @@ enum PricingType {
   METERED
 }
 
+enum PurchaseType {
+  SUBSCRIPTION
+  ONE_TIME
+}
+
 model Product {
   id                   String         @id @default(uuid())
   name                 String
@@ -38,8 +43,12 @@ model Product {
   category             String?
   stripeProductId      String?        @unique @map("stripe_product_id")
   stripePriceId        String?        @map("stripe_price_id")
+  stripePriceIdAnnual  String?        @map("stripe_price_id_annual")
+  priceMonthly         Int?           @map("price_monthly")       // Price in cents
+  priceAnnual          Int?           @map("price_annual")        // Price in cents
   validationMode       ValidationMode @default(ONLINE) @map("validation_mode")
   pricingType          PricingType    @default(FIXED) @map("pricing_type")
+  purchaseType         PurchaseType   @default(SUBSCRIPTION) @map("purchase_type")
   licenseDurationDays  Int?           @map("license_duration_days")
   s3PackageKey         String?        @map("s3_package_key")
   version              String?
