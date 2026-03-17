@@ -2,8 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from './config/index.js';
-import { connectDatabase, disconnectDatabase } from './config/database.js';
+import { connectDatabase, disconnectDatabase, prisma } from './config/database.js';
 import { ensureAdminExists } from './services/customer.service.js';
+import { getCorsConfig, isCorsEnabled } from './config/cors.js';
+import { initializeAuthProvider } from './auth/index.js';
+import { initializeConfigProvider } from './config/providers/index.js';
 
 import adminRoutes from './routes/admin.js';
 import portalRoutes from './routes/portal.js';
@@ -14,7 +17,11 @@ const app = express();
 
 // Security middleware
 app.use(helmet());
-app.use(cors());
+
+// Configurable CORS
+if (isCorsEnabled()) {
+  app.use(cors(getCorsConfig()));
+}
 
 // Stripe webhooks need raw body
 app.use('/webhooks', express.raw({ type: 'application/json' }));
@@ -38,13 +45,79 @@ app.get('/', (_req, res) => {
       portal: '/api/portal',
       validation: '/api/v1',
       webhooks: '/webhooks/stripe',
+      health: '/health',
+      ready: '/health/ready',
     },
   });
 });
 
-// Health check
+// Health check - Liveness probe
+// Returns OK if the server is running
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Liveness alias
+app.get('/health/live', (_req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Readiness probe - checks if dependencies are available
+// Returns OK only if the server can handle traffic
+app.get('/health/ready', async (_req, res) => {
+  const checks: Record<string, { status: string; latency?: number; error?: string }> = {};
+  let isReady = true;
+
+  // Check database connection
+  const dbStart = Date.now();
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    checks.database = {
+      status: 'ok',
+      latency: Date.now() - dbStart,
+    };
+  } catch (error) {
+    isReady = false;
+    checks.database = {
+      status: 'error',
+      latency: Date.now() - dbStart,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+
+  // Optional: Check AWS connectivity if using AWS services
+  if (config.S3_BUCKET_NAME) {
+    const s3Start = Date.now();
+    try {
+      const { s3Client } = await import('./config/s3.js');
+      const { HeadBucketCommand } = await import('@aws-sdk/client-s3');
+      await s3Client.send(new HeadBucketCommand({ Bucket: config.S3_BUCKET_NAME }));
+      checks.s3 = {
+        status: 'ok',
+        latency: Date.now() - s3Start,
+      };
+    } catch (error) {
+      // S3 check is informational, don't fail readiness
+      checks.s3 = {
+        status: 'degraded',
+        latency: Date.now() - s3Start,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  const statusCode = isReady ? 200 : 503;
+  res.status(statusCode).json({
+    status: isReady ? 'ready' : 'not_ready',
+    timestamp: new Date().toISOString(),
+    checks,
+  });
 });
 
 // 404 handler
@@ -71,6 +144,12 @@ process.on('SIGINT', shutdown);
 // Start server
 async function start() {
   try {
+    // Initialize config provider (supports env, secrets-manager, kubernetes)
+    await initializeConfigProvider();
+
+    // Initialize auth provider (supports jwt, cognito)
+    await initializeAuthProvider();
+
     await connectDatabase();
     await ensureAdminExists();
 
@@ -78,6 +157,8 @@ async function start() {
     app.listen(port, () => {
       console.log(`License Server running on port ${port}`);
       console.log(`Environment: ${config.NODE_ENV}`);
+      console.log(`Config provider: ${process.env.CONFIG_PROVIDER || 'env'}`);
+      console.log(`Auth provider: ${process.env.AUTH_PROVIDER || 'jwt'}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

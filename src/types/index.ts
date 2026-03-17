@@ -6,6 +6,8 @@ export interface AuthenticatedRequest extends Request {
     id: string;
     email: string;
     isAdmin: boolean;
+    cognitoSub?: string;
+    groups?: string[];
   };
 }
 
