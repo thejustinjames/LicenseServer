@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard - License Server</title>
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <header>
+    <a href="/admin.html" class="logo">
+      <div class="logo-placeholder">LS</div>
+      <span>Admin Dashboard</span>
+    </a>
+    <nav>
+      <a href="/" class="nav-link">View Store</a>
+      <div id="adminNav" class="user-menu">
+        <span class="user-email" id="adminEmail"></span>
+        <button class="btn btn-danger" id="logoutBtn">Logout</button>
+      </div>
+    </nav>
+  </header>
+
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <nav class="sidebar-nav">
+        <a href="#" class="sidebar-link active" data-section="dashboard">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+          Dashboard
+        </a>
+        <a href="#" class="sidebar-link" data-section="products">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          </svg>
+          Products
+        </a>
+        <a href="#" class="sidebar-link" data-section="licenses">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          Licenses
+        </a>
+        <a href="#" class="sidebar-link" data-section="customers">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+          Customers
+        </a>
+        <a href="#" class="sidebar-link" data-section="subscriptions">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
+            <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
+            <path d="M18 12a2 2 0 0 0 0 4h4v-4h-4z"></path>
+          </svg>
+          Subscriptions
+        </a>
+        <a href="#" class="sidebar-link" data-section="refunds">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+          Refunds
+        </a>
+      </nav>
+    </aside>
+
+    <main class="admin-main">
+      <!-- Login Section -->
+      <section id="login" class="admin-section active">
+        <div class="auth-container">
+          <h2>Admin Login</h2>
+          <div id="loginAlert"></div>
+          <form id="loginForm">
+            <div class="form-group">
+              <label for="loginEmail">Email</label>
+              <input type="email" id="loginEmail" required placeholder="admin@example.com">
+            </div>
+            <div class="form-group">
+              <label for="loginPassword">Password</label>
+              <input type="password" id="loginPassword" required placeholder="Password">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- Dashboard Section -->
+      <section id="dashboard" class="admin-section">
+        <h1>Dashboard</h1>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <h4>Total Products</h4>
+            <div class="value" id="statProducts">-</div>
+          </div>
+          <div class="stat-card">
+            <h4>Active Licenses</h4>
+            <div class="value" id="statLicenses">-</div>
+          </div>
+          <div class="stat-card">
+            <h4>Customers</h4>
+            <div class="value" id="statCustomers">-</div>
+          </div>
+          <div class="stat-card">
+            <h4>Active Subscriptions</h4>
+            <div class="value" id="statSubscriptions">-</div>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <div class="table-header">Recent Licenses</div>
+          <table>
+            <thead>
+              <tr>
+                <th>License Key</th>
+                <th>Product</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="recentLicensesTable">
+              <tr><td colspan="5" class="loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Products Section -->
+      <section id="products" class="admin-section">
+        <div class="section-header">
+          <h1>Products</h1>
+          <button class="btn btn-primary" id="addProductBtn">+ Add Product</button>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Features</th>
+                <th>Stripe Price</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="productsTable">
+              <tr><td colspan="5" class="loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Licenses Section -->
+      <section id="licenses" class="admin-section">
+        <div class="section-header">
+          <h1>Licenses</h1>
+          <button class="btn btn-primary" id="addLicenseBtn">+ Create License</button>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>License Key</th>
+                <th>Product</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th>Activations</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="licensesTable">
+              <tr><td colspan="6" class="loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Customers Section -->
+      <section id="customers" class="admin-section">
+        <h1>Customers</h1>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Stripe ID</th>
+                <th>Admin</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="customersTable">
+              <tr><td colspan="5" class="loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Subscriptions Section -->
+      <section id="subscriptions" class="admin-section">
+        <h1>Subscriptions</h1>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Subscription ID</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th>Period End</th>
+                <th>Cancel at End</th>
+              </tr>
+            </thead>
+            <tbody id="subscriptionsTable">
+              <tr><td colspan="5" class="loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Refunds Section -->
+      <section id="refunds" class="admin-section">
+        <h1>Refunds</h1>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Refund ID</th>
+                <th>Customer</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Licenses Revoked</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="refundsTable">
+              <tr><td colspan="6" class="loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Product Modal -->
+  <div class="modal" id="productModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="productModalTitle">Add Product</h2>
+        <button class="modal-close" id="closeProductModal">&times;</button>
+      </div>
+      <form id="productForm">
+        <input type="hidden" id="productId">
+
+        <div class="form-group">
+          <label for="productName">Product Name *</label>
+          <input type="text" id="productName" required placeholder="e.g., Pro License">
+        </div>
+
+        <div class="form-group">
+          <label for="productDescription">Description</label>
+          <textarea id="productDescription" rows="3" placeholder="Describe your product..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="productFeatures">Features (comma-separated)</label>
+          <input type="text" id="productFeatures" placeholder="e.g., unlimited-projects, priority-support, api-access">
+          <small>These will be available for feature checking in your app</small>
+        </div>
+
+        <div class="form-group">
+          <label for="licenseDuration">License Duration (days)</label>
+          <input type="number" id="licenseDuration" min="1" placeholder="Leave empty for perpetual">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="validationMode">Validation Mode</label>
+            <select id="validationMode">
+              <option value="ONLINE">Online</option>
+              <option value="OFFLINE">Offline</option>
+              <option value="HYBRID">Hybrid</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="pricingType">Pricing Type</label>
+            <select id="pricingType">
+              <option value="FIXED">Fixed</option>
+              <option value="METERED">Metered (Usage-based)</option>
+            </select>
+          </div>
+        </div>
+
+        <hr>
+        <h3>Stripe Integration</h3>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="createStripeProduct">
+            Create Stripe Product & Price
+          </label>
+        </div>
+
+        <div id="stripeFields" class="hidden">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="stripePrice">Price (cents) *</label>
+              <input type="number" id="stripePrice" min="1" placeholder="999 = $9.99">
+            </div>
+            <div class="form-group">
+              <label for="stripeCurrency">Currency</label>
+              <select id="stripeCurrency">
+                <option value="usd">USD</option>
+                <option value="eur">EUR</option>
+                <option value="gbp">GBP</option>
+                <option value="aud">AUD</option>
+                <option value="cad">CAD</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="stripeInterval">Billing Interval</label>
+            <select id="stripeInterval">
+              <option value="month">Monthly</option>
+              <option value="year">Yearly</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelProductBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Product</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- License Modal -->
+  <div class="modal" id="licenseModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Create License</h2>
+        <button class="modal-close" id="closeLicenseModal">&times;</button>
+      </div>
+      <form id="licenseForm">
+        <div class="form-group">
+          <label for="licenseProduct">Product *</label>
+          <select id="licenseProduct" required>
+            <option value="">Select a product...</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="licenseCustomer">Customer *</label>
+          <select id="licenseCustomer" required>
+            <option value="">Select a customer...</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="licenseMaxActivations">Max Activations</label>
+          <input type="number" id="licenseMaxActivations" min="1" value="1">
+        </div>
+
+        <div class="form-group">
+          <label for="licenseExpiry">Expiry Date (optional)</label>
+          <input type="datetime-local" id="licenseExpiry">
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelLicenseBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create License</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/admin.js"></script>
+</body>
+</html>

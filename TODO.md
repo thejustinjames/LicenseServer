@@ -20,7 +20,6 @@
 - [ ] Alert rules for critical metrics
 
 ### Optional Enhancements
-- [ ] Admin dashboard UI (currently API-only)
 - [ ] License transfer between customers
 - [ ] Multi-currency support
 - [ ] Webhook retry queue with dead letter handling

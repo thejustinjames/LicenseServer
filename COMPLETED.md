@@ -72,6 +72,13 @@
 - [x] Success page with professional icon
 - [x] CSP-compliant (no inline scripts)
 - [x] Responsive design
+- [x] Admin Dashboard (`/admin.html`)
+  - Dashboard with stats overview
+  - Products management (CRUD with Stripe integration)
+  - Licenses management (create, suspend, revoke, reactivate)
+  - Customers listing
+  - Subscriptions listing
+  - Refunds listing
 
 ## Phase 7: Offline License Support
 - [x] RSA key loading infrastructure
@@ -149,6 +156,7 @@
 
 | Date | Task | Phase |
 |------|------|-------|
+| 2026-03-17 | Admin Dashboard UI | Phase 6 |
 | 2026-03-17 | Production deployment documentation | Phase 8 |
 | 2026-03-17 | Unit tests with Vitest (25 tests) | Phase 8 |
 | 2026-03-17 | Microsoft Graph email service | Phase 10 |
