@@ -1,5 +1,9 @@
 # License Server
 
+> **PROPRIETARY SOFTWARE** - Copyright (c) 2026 Justin James. All Rights Reserved.
+>
+> This software is confidential and proprietary. Unauthorized copying, distribution, or use is strictly prohibited. See [LICENSE](LICENSE) for details.
+
 A Lemon Squeezy-style license server with Stripe payments, license key management, software distribution via S3, and a customer portal.
 
 ## Features
@@ -410,4 +414,8 @@ The public key can be embedded in your client application for offline license ve
 
 ## License
 
-MIT
+**Proprietary Software** - Copyright (c) 2026 Justin James. All Rights Reserved.
+
+This software is proprietary and confidential. No license is granted for use, copying, modification, or distribution without prior written consent from the copyright holder.
+
+See [LICENSE](LICENSE) for full terms.

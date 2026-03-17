@@ -53,3 +53,31 @@ obj/
 *.suo
 # RSA keys (keep private.pem secret!)
 keys/private.pem
+
+# Credentials & Secrets
+*.credentials
+*.secrets
+credentials.json
+secrets.json
+service-account*.json
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Test artifacts
+test-results/
+.nyc_output/
+
+# Docker
+docker-compose.override.yml
+
+# Local configuration
+local.env
+*.local.json

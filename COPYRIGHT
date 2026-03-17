@@ -1,0 +1,52 @@
+COPYRIGHT NOTICE
+
+License Server
+Copyright (c) 2026 Justin James. All Rights Reserved.
+
+This software and its documentation are proprietary and confidential.
+Unauthorized copying, distribution, modification, public display, or public
+performance of this software is strictly prohibited.
+
+INTELLECTUAL PROPERTY OWNERSHIP
+-------------------------------
+All intellectual property rights in this software, including but not limited to:
+
+- Source code and object code
+- Software architecture and design
+- Database schemas and data models
+- API specifications and interfaces
+- User interface designs
+- Documentation and specifications
+- Trade secrets and know-how
+- Any improvements or modifications
+
+are owned exclusively by Justin James.
+
+PROTECTED ELEMENTS
+------------------
+The following elements are protected under applicable intellectual property laws:
+
+1. The "License Server" name and branding
+2. All source code files (*.ts, *.js, *.css, *.html)
+3. Database schema definitions (Prisma schema)
+4. API endpoint designs and implementations
+5. Client SDK implementations (Node.js, Swift, C#, Rust)
+6. Configuration and deployment scripts
+7. Documentation files
+
+THIRD-PARTY COMPONENTS
+----------------------
+This software utilizes open-source libraries and third-party services that are
+subject to their own license terms. See package.json for a list of dependencies.
+
+Third-party services integrated:
+- Stripe (Payment processing) - https://stripe.com/legal
+- AWS (Cloud services) - https://aws.amazon.com/legal/
+- Microsoft Graph (Email) - https://docs.microsoft.com/legal/
+
+CONTACT
+-------
+For licensing inquiries or permissions:
+Copyright Holder: Justin James
+
+Date: March 2026
