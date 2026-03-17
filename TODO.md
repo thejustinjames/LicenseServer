@@ -1,48 +1,31 @@
 # License Server - TODO
 
-## Phase 1: Foundation
-- [ ] Initialize Node.js/TypeScript project with Express
-- [ ] Set up Prisma with PostgreSQL schema
-- [ ] Configure Docker Compose (app + postgres)
-- [ ] Create environment configuration
+## Remaining Tasks
 
-## Phase 2: Core Services
-- [ ] License key generation (cryptographically secure)
-- [ ] License service (create, validate, activate, revoke)
-- [ ] Product service (CRUD)
-- [ ] Customer service (CRUD, auth)
+### Offline License Support
+- [ ] Generate RSA key pair for offline license signing (`keys/private.pem`, `keys/public.pem`)
+- [ ] Document client-side offline license validation
 
-## Phase 3: Stripe Integration
-- [ ] Stripe SDK setup
-- [ ] Create checkout sessions
-- [ ] Webhook handlers for subscription lifecycle
-- [ ] Automatic license provisioning on payment
+### Testing
+- [ ] Add unit tests for services
+- [ ] Add integration tests for APIs
+- [ ] Add E2E tests for Stripe checkout flow
 
-## Phase 4: APIs
-- [ ] Admin API with JWT auth
-- [ ] License validation API
-- [ ] Customer portal API
-- [ ] Stripe webhook endpoint
+### Production Deployment
+- [ ] Production deployment documentation
+- [ ] CI/CD pipeline setup
+- [ ] Monitoring and alerting setup
+- [ ] Rate limiting fine-tuning for production
 
-## Phase 5: S3 Integration
-- [ ] AWS SDK setup
-- [ ] Signed URL generation for downloads
-- [ ] Upload endpoint for admin
+### Optional Enhancements
+- [ ] Email notifications (trial ending, payment failed, refund processed)
+- [ ] Admin dashboard UI (currently API-only)
+- [ ] License transfer between customers
+- [ ] Multi-currency support
+- [ ] Webhook retry queue with dead letter handling
 
-## Phase 6: Customer Portal Frontend
-- [ ] React/Next.js frontend setup
-- [ ] Login/Register pages
-- [ ] License dashboard
-- [ ] Download software page
-- [ ] Stripe billing portal redirect
+---
 
-## Phase 7: Offline License Support
-- [ ] RSA key pair generation
-- [ ] Signed license token creation
-- [ ] Document client-side validation
+## Completed Phases
 
-## Phase 8: Testing & Deployment
-- [ ] Unit tests for services
-- [ ] Integration tests for APIs
-- [ ] Docker build verification
-- [ ] Production deployment docs
+See [COMPLETED.md](./COMPLETED.md) for full details on implemented features.

@@ -1,11 +1,13 @@
 import { prisma } from '../config/database.js';
 import { stripe } from '../config/stripe.js';
-import { Product, ValidationMode } from '@prisma/client';
+import { Product, ValidationMode, PricingType } from '@prisma/client';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface CreateProductInput {
   name: string;
   description?: string;
   validationMode?: ValidationMode;
+  pricingType?: PricingType;
   licenseDurationDays?: number;
   s3PackageKey?: string;
   version?: string;
@@ -14,36 +16,92 @@ export interface CreateProductInput {
   stripePriceAmount?: number;
   stripePriceCurrency?: string;
   stripePriceInterval?: 'month' | 'year';
+  // Metered billing options
+  meteredUsageType?: 'licensed' | 'metered' | 'aggregated';
+  meteredAggregateUsage?: 'sum' | 'last_during_period' | 'last_ever' | 'max';
+  // Tax options
+  taxCode?: string;
+  taxBehavior?: 'exclusive' | 'inclusive' | 'unspecified';
 }
 
 export interface UpdateProductInput {
   name?: string;
   description?: string;
   validationMode?: ValidationMode;
+  pricingType?: PricingType;
   licenseDurationDays?: number | null;
   s3PackageKey?: string;
   version?: string;
   features?: string[];
 }
 
+/**
+ * Generate an idempotency key for Stripe operations
+ */
+function generateIdempotencyKey(operation: string, resourceId?: string): string {
+  const id = resourceId || uuidv4();
+  return `${operation}-${id}-${Date.now()}`;
+}
+
 export async function createProduct(input: CreateProductInput): Promise<Product> {
   let stripeProductId: string | undefined;
   let stripePriceId: string | undefined;
 
-  if (input.createStripeProduct && input.stripePriceAmount) {
-    const stripeProduct = await stripe.products.create({
+  if (input.createStripeProduct && input.stripePriceAmount !== undefined) {
+    const idempotencyKey = generateIdempotencyKey('create-product', input.name);
+
+    // Create product in Stripe with tax code if provided
+    const productParams: Parameters<typeof stripe.products.create>[0] = {
       name: input.name,
       description: input.description,
+    };
+
+    // Add tax code for Stripe Tax
+    if (input.taxCode) {
+      productParams.tax_code = input.taxCode;
+    }
+
+    const stripeProduct = await stripe.products.create(productParams, {
+      idempotencyKey,
     });
     stripeProductId = stripeProduct.id;
 
-    const stripePrice = await stripe.prices.create({
+    // Create price in Stripe
+    const priceIdempotencyKey = generateIdempotencyKey('create-price', stripeProduct.id);
+
+    const isMetered = input.pricingType === 'METERED';
+
+    const priceParams: Parameters<typeof stripe.prices.create>[0] = {
       product: stripeProduct.id,
-      unit_amount: input.stripePriceAmount,
       currency: input.stripePriceCurrency || 'usd',
-      recurring: input.stripePriceInterval
-        ? { interval: input.stripePriceInterval }
-        : undefined,
+    };
+
+    if (isMetered) {
+      // Metered pricing - usage-based
+      priceParams.recurring = {
+        interval: input.stripePriceInterval || 'month',
+        usage_type: 'metered',
+        aggregate_usage: input.meteredAggregateUsage || 'sum',
+      };
+      // For metered pricing, unit_amount is the price per unit
+      priceParams.unit_amount = input.stripePriceAmount;
+    } else {
+      // Fixed pricing
+      priceParams.unit_amount = input.stripePriceAmount;
+      if (input.stripePriceInterval) {
+        priceParams.recurring = {
+          interval: input.stripePriceInterval,
+        };
+      }
+    }
+
+    // Add tax behavior
+    if (input.taxBehavior) {
+      priceParams.tax_behavior = input.taxBehavior;
+    }
+
+    const stripePrice = await stripe.prices.create(priceParams, {
+      idempotencyKey: priceIdempotencyKey,
     });
     stripePriceId = stripePrice.id;
   }
@@ -53,6 +111,7 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       name: input.name,
       description: input.description,
       validationMode: input.validationMode || 'ONLINE',
+      pricingType: input.pricingType || 'FIXED',
       licenseDurationDays: input.licenseDurationDays,
       s3PackageKey: input.s3PackageKey,
       version: input.version,
@@ -82,6 +141,29 @@ export async function listProducts(): Promise<Product[]> {
 }
 
 export async function updateProduct(id: string, input: UpdateProductInput): Promise<Product> {
+  const product = await prisma.product.findUnique({ where: { id } });
+
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  // If product has Stripe integration, update Stripe product too
+  if (product.stripeProductId && (input.name || input.description)) {
+    try {
+      const idempotencyKey = generateIdempotencyKey('update-product', product.stripeProductId);
+      await stripe.products.update(
+        product.stripeProductId,
+        {
+          name: input.name,
+          description: input.description,
+        },
+        { idempotencyKey }
+      );
+    } catch (error) {
+      console.warn('Failed to update Stripe product:', error instanceof Error ? error.message : error);
+    }
+  }
+
   return prisma.product.update({
     where: { id },
     data: input,
@@ -99,7 +181,16 @@ export async function deleteProduct(id: string): Promise<void> {
   }
 
   if (product?.stripeProductId) {
-    await stripe.products.update(product.stripeProductId, { active: false });
+    try {
+      const idempotencyKey = generateIdempotencyKey('archive-product', product.stripeProductId);
+      await stripe.products.update(
+        product.stripeProductId,
+        { active: false },
+        { idempotencyKey }
+      );
+    } catch (error) {
+      console.warn('Failed to archive Stripe product:', error instanceof Error ? error.message : error);
+    }
   }
 
   await prisma.product.delete({ where: { id } });
@@ -114,4 +205,150 @@ export async function linkStripeProduct(
     where: { id: productId },
     data: { stripeProductId, stripePriceId },
   });
+}
+
+/**
+ * Create a metered price for an existing product
+ */
+export async function createMeteredPrice(
+  productId: string,
+  options: {
+    unitAmount: number;
+    currency?: string;
+    interval?: 'month' | 'year';
+    aggregateUsage?: 'sum' | 'last_during_period' | 'last_ever' | 'max';
+    taxBehavior?: 'exclusive' | 'inclusive' | 'unspecified';
+  }
+): Promise<Product> {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  if (!product.stripeProductId) {
+    throw new Error('Product does not have a Stripe product linked');
+  }
+
+  const idempotencyKey = generateIdempotencyKey('create-metered-price', product.stripeProductId);
+
+  const stripePrice = await stripe.prices.create(
+    {
+      product: product.stripeProductId,
+      unit_amount: options.unitAmount,
+      currency: options.currency || 'usd',
+      recurring: {
+        interval: options.interval || 'month',
+        usage_type: 'metered',
+        aggregate_usage: options.aggregateUsage || 'sum',
+      },
+      tax_behavior: options.taxBehavior,
+    },
+    { idempotencyKey }
+  );
+
+  return prisma.product.update({
+    where: { id: productId },
+    data: {
+      stripePriceId: stripePrice.id,
+      pricingType: 'METERED',
+    },
+  });
+}
+
+/**
+ * Update the tax code for a product
+ */
+export async function updateProductTaxCode(productId: string, taxCode: string): Promise<Product> {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  if (!product.stripeProductId) {
+    throw new Error('Product does not have a Stripe product linked');
+  }
+
+  const idempotencyKey = generateIdempotencyKey('update-tax-code', product.stripeProductId);
+
+  await stripe.products.update(
+    product.stripeProductId,
+    { tax_code: taxCode },
+    { idempotencyKey }
+  );
+
+  return product;
+}
+
+/**
+ * List common tax codes for software products
+ */
+export function getCommonTaxCodes(): Array<{ code: string; name: string; description: string }> {
+  return [
+    {
+      code: 'txcd_10000000',
+      name: 'General - Tangible Goods',
+      description: 'General category for physical goods',
+    },
+    {
+      code: 'txcd_10103001',
+      name: 'Software - SaaS',
+      description: 'Software as a Service subscriptions',
+    },
+    {
+      code: 'txcd_10103002',
+      name: 'Software - Downloaded',
+      description: 'Downloadable software products',
+    },
+    {
+      code: 'txcd_10103003',
+      name: 'Software - Pre-written',
+      description: 'Pre-written, non-customized software',
+    },
+    {
+      code: 'txcd_10103004',
+      name: 'Software - Custom',
+      description: 'Custom software development',
+    },
+    {
+      code: 'txcd_10401000',
+      name: 'Digital Goods',
+      description: 'General digital goods category',
+    },
+  ];
+}
+
+/**
+ * Get Stripe product pricing info
+ */
+export async function getStripePricingInfo(productId: string): Promise<{
+  priceId: string;
+  unitAmount: number;
+  currency: string;
+  interval?: string;
+  isMetered: boolean;
+  taxBehavior?: string;
+} | null> {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+
+  if (!product?.stripePriceId) {
+    return null;
+  }
+
+  try {
+    const price = await stripe.prices.retrieve(product.stripePriceId);
+
+    return {
+      priceId: price.id,
+      unitAmount: price.unit_amount || 0,
+      currency: price.currency,
+      interval: price.recurring?.interval,
+      isMetered: price.recurring?.usage_type === 'metered',
+      taxBehavior: price.tax_behavior || undefined,
+    };
+  } catch (error) {
+    console.error('Failed to retrieve Stripe price:', error);
+    return null;
+  }
 }

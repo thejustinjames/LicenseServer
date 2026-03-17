@@ -6,9 +6,30 @@ import * as customerService from '../services/customer.service.js';
 import * as licenseService from '../services/license.service.js';
 import * as paymentService from '../services/payment.service.js';
 import * as storageService from '../services/storage.service.js';
+import * as productService from '../services/product.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 const router = Router();
+
+// Public routes (no authentication required)
+router.get('/products', async (_req, res: Response) => {
+  try {
+    const products = await productService.listProducts();
+    // Return only public product info (no sensitive data)
+    const publicProducts = products.map(p => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      features: p.features,
+      pricingType: p.pricingType,
+      hasStripePrice: !!p.stripePriceId,
+    }));
+    res.json(publicProducts);
+  } catch (error) {
+    console.error('List products error:', error);
+    res.status(500).json({ error: 'Failed to list products' });
+  }
+});
 
 // Auth schemas
 const registerSchema = z.object({
@@ -244,6 +265,101 @@ router.get('/subscriptions', authenticate, async (req: AuthenticatedRequest, res
   } catch (error) {
     console.error('Get subscriptions error:', error);
     res.status(500).json({ error: 'Failed to get subscriptions' });
+  }
+});
+
+// Cancel subscription at period end
+router.post('/subscriptions/:id/cancel', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    await paymentService.cancelSubscription(req.params.id);
+    res.json({ success: true, message: 'Subscription will be canceled at period end' });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('not found')) {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    console.error('Cancel subscription error:', error);
+    res.status(500).json({ error: 'Failed to cancel subscription' });
+  }
+});
+
+// Reactivate a canceled subscription
+router.post('/subscriptions/:id/reactivate', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    await paymentService.reactivateSubscription(req.params.id);
+    res.json({ success: true, message: 'Subscription reactivated' });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('not found')) {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    console.error('Reactivate subscription error:', error);
+    res.status(500).json({ error: 'Failed to reactivate subscription' });
+  }
+});
+
+// Get usage summary for a subscription
+router.get('/subscriptions/:id/usage', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const summary = await paymentService.getUsageSummary(req.params.id);
+    if (!summary) {
+      res.status(404).json({ error: 'Subscription not found or not metered' });
+      return;
+    }
+
+    res.json(summary);
+  } catch (error) {
+    console.error('Get usage summary error:', error);
+    res.status(500).json({ error: 'Failed to get usage summary' });
+  }
+});
+
+// Get usage records for a subscription
+router.get('/subscriptions/:id/usage/records', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const records = await paymentService.getUsageRecords(req.params.id, {
+      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+    });
+    res.json(records);
+  } catch (error) {
+    console.error('Get usage records error:', error);
+    res.status(500).json({ error: 'Failed to get usage records' });
+  }
+});
+
+// Get refunds
+router.get('/refunds', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const refunds = await paymentService.getRefundsByCustomerId(req.user.id);
+    res.json(refunds);
+  } catch (error) {
+    console.error('Get refunds error:', error);
+    res.status(500).json({ error: 'Failed to get refunds' });
   }
 });
 

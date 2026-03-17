@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>License Server</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <a href="#" class="logo" id="logoLink">
+      <div class="logo-placeholder">LS</div>
+      <span>License Server</span>
+    </a>
+    <nav>
+      <a href="#" class="nav-link" id="productsLink">Products</a>
+      <div id="authNav">
+        <button class="btn btn-secondary" id="loginBtn">Login</button>
+        <button class="btn btn-primary" id="signupBtn">Sign Up</button>
+      </div>
+      <div id="userNav" class="user-menu hidden">
+        <span class="user-email" id="userEmail"></span>
+        <button class="btn btn-secondary" id="dashboardBtn">Dashboard</button>
+        <button class="btn btn-danger" id="logoutBtn">Logout</button>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Home Section -->
+    <section id="home" class="section active">
+      <div class="hero">
+        <h1>Software Licensing Made Simple</h1>
+        <p>Manage your software licenses with ease. Secure, scalable, and developer-friendly.</p>
+        <button class="btn btn-primary" id="heroSignupBtn" style="background: white; color: #2563eb; padding: 0.8rem 2rem; font-size: 1.1rem;">Get Started</button>
+      </div>
+
+      <h2 style="margin-bottom: 0.5rem; color: #1e293b;">Available Products</h2>
+      <p style="color: #64748b; margin-bottom: 1rem;">Choose a plan that fits your needs</p>
+
+      <div id="productsGrid" class="products-grid">
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading products...
+        </div>
+      </div>
+    </section>
+
+    <!-- Login Section -->
+    <section id="login" class="section">
+      <div class="auth-container">
+        <h2>Welcome Back</h2>
+        <div id="loginAlert"></div>
+        <form id="loginForm">
+          <div class="form-group">
+            <label for="loginEmail">Email</label>
+            <input type="email" id="loginEmail" required placeholder="you@example.com">
+          </div>
+          <div class="form-group">
+            <label for="loginPassword">Password</label>
+            <input type="password" id="loginPassword" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Login</button>
+        </form>
+        <p class="auth-toggle">
+          Don't have an account? <a id="switchToRegister">Sign up</a>
+        </p>
+      </div>
+    </section>
+
+    <!-- Register Section -->
+    <section id="register" class="section">
+      <div class="auth-container">
+        <h2>Create Account</h2>
+        <div id="registerAlert"></div>
+        <form id="registerForm">
+          <div class="form-group">
+            <label for="registerName">Name</label>
+            <input type="text" id="registerName" placeholder="John Doe">
+          </div>
+          <div class="form-group">
+            <label for="registerEmail">Email</label>
+            <input type="email" id="registerEmail" required placeholder="you@example.com">
+          </div>
+          <div class="form-group">
+            <label for="registerPassword">Password</label>
+            <div class="password-input-wrapper">
+              <input type="password" id="registerPassword" required minlength="8" placeholder="••••••••">
+              <button type="button" class="password-toggle" id="togglePassword" aria-label="Show password">
+                <svg class="eye-icon" id="eyeIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg class="eye-off-icon hidden" id="eyeOffIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Create Account</button>
+        </form>
+        <p class="auth-toggle">
+          Already have an account? <a id="switchToLogin">Login</a>
+        </p>
+      </div>
+    </section>
+
+    <!-- Dashboard Section -->
+    <section id="dashboard" class="section">
+      <div class="dashboard-header">
+        <h2>Dashboard</h2>
+        <button class="btn btn-primary" id="billingPortalBtn">Manage Billing</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h4>Active Licenses</h4>
+          <div class="value" id="activeLicenseCount">-</div>
+        </div>
+        <div class="stat-card">
+          <h4>Active Subscriptions</h4>
+          <div class="value" id="activeSubCount">-</div>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <div class="table-header">Your Licenses</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>License Key</th>
+              <th>Status</th>
+              <th>Expires</th>
+              <th>Activations</th>
+            </tr>
+          </thead>
+          <tbody id="licensesTable">
+            <tr>
+              <td colspan="5" class="loading">Loading licenses...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-container">
+        <div class="table-header">Your Subscriptions</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Subscription ID</th>
+              <th>Status</th>
+              <th>Current Period End</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="subscriptionsTable">
+            <tr>
+              <td colspan="4" class="loading">Loading subscriptions...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Success Section -->
+    <section id="success" class="section">
+      <div class="auth-container" style="text-align: center;">
+        <div class="success-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9 12l2 2 4-4"></path>
+          </svg>
+        </div>
+        <h2>Payment Successful!</h2>
+        <p style="color: #64748b; margin: 1rem 0;">Your license has been activated. Check your dashboard for details.</p>
+        <button class="btn btn-primary" id="successDashboardBtn">Go to Dashboard</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

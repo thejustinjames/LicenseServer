@@ -26,6 +26,11 @@ enum SubscriptionStatus {
   PAST_DUE
 }
 
+enum PricingType {
+  FIXED
+  METERED
+}
+
 model Product {
   id                   String         @id @default(uuid())
   name                 String
@@ -33,6 +38,7 @@ model Product {
   stripeProductId      String?        @unique @map("stripe_product_id")
   stripePriceId        String?        @map("stripe_price_id")
   validationMode       ValidationMode @default(ONLINE) @map("validation_mode")
+  pricingType          PricingType    @default(FIXED) @map("pricing_type")
   licenseDurationDays  Int?           @map("license_duration_days")
   s3PackageKey         String?        @map("s3_package_key")
   version              String?
@@ -57,6 +63,7 @@ model Customer {
 
   licenses      License[]
   subscriptions Subscription[]
+  refunds       Refund[]
 
   @@map("customers")
 }
@@ -91,10 +98,13 @@ model Subscription {
   stripeSubscriptionId String             @unique @map("stripe_subscription_id")
   status               SubscriptionStatus @default(ACTIVE)
   currentPeriodEnd     DateTime?          @map("current_period_end")
+  trialEnd             DateTime?          @map("trial_end")
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
   createdAt            DateTime           @default(now()) @map("created_at")
   updatedAt            DateTime           @updatedAt @map("updated_at")
 
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  usageRecords UsageRecord[]
 
   @@index([customerId])
   @@map("subscriptions")
@@ -114,4 +124,44 @@ model LicenseActivation {
   @@unique([licenseId, machineFingerprint])
   @@index([licenseId])
   @@map("license_activations")
+}
+
+// Usage-based billing records
+model UsageRecord {
+  id                   String   @id @default(uuid())
+  subscriptionId       String   @map("subscription_id")
+  stripeSubscriptionId String   @map("stripe_subscription_id")
+  quantity             Int
+  action               String   @default("increment") // increment or set
+  timestamp            DateTime @default(now())
+  idempotencyKey       String?  @unique @map("idempotency_key")
+  stripeUsageRecordId  String?  @map("stripe_usage_record_id")
+  metadata             Json?
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([stripeSubscriptionId])
+  @@map("usage_records")
+}
+
+// Refund tracking
+model Refund {
+  id               String   @id @default(uuid())
+  stripeRefundId   String   @unique @map("stripe_refund_id")
+  stripeChargeId   String   @map("stripe_charge_id")
+  customerId       String   @map("customer_id")
+  amount           Int      // Amount in cents
+  currency         String   @default("usd")
+  reason           String?
+  status           String   // succeeded, pending, failed, canceled
+  licensesRevoked  Boolean  @default(false) @map("licenses_revoked")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("refunds")
 }

@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from './config/index.js';
 import { connectDatabase, disconnectDatabase, prisma } from './config/database.js';
 import { ensureAdminExists } from './services/customer.service.js';
@@ -16,7 +18,18 @@ import webhookRoutes from './routes/webhooks.js';
 const app = express();
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://checkout.stripe.com", "https://api.stripe.com"],
+      frameSrc: ["'self'", "https://checkout.stripe.com", "https://js.stripe.com"],
+    },
+  },
+}));
 
 // Configurable CORS
 if (isCorsEnabled()) {
@@ -35,10 +48,16 @@ app.use('/api/portal', portalRoutes);
 app.use('/api/v1', validationRoutes);
 app.use('/webhooks', webhookRoutes);
 
-// Root endpoint
-app.get('/', (_req, res) => {
+// Serve static frontend
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const publicPath = path.join(__dirname, '../public');
+app.use(express.static(publicPath));
+
+// API info endpoint
+app.get('/api', (_req, res) => {
   res.json({
-    name: 'License Server',
+    name: 'License Server API',
     version: '1.0.0',
     endpoints: {
       admin: '/api/admin',
@@ -120,7 +139,13 @@ app.get('/health/ready', async (_req, res) => {
   });
 });
 
-// 404 handler
+// SPA catch-all route - serve index.html for any non-API routes
+// This must come AFTER static middleware and API routes, but BEFORE 404 handler
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(publicPath, 'index.html'));
+});
+
+// 404 handler (for POST/PUT/DELETE to unknown routes)
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });

@@ -17,6 +17,15 @@ const envSchema = z.object({
   STRIPE_SUCCESS_URL: z.string().url(),
   STRIPE_CANCEL_URL: z.string().url(),
 
+  // Stripe Tax Configuration
+  STRIPE_TAX_ENABLED: z.string().default('false'),
+  STRIPE_TAX_BEHAVIOR: z.enum(['exclusive', 'inclusive']).default('exclusive'),
+
+  // Stripe Billing Configuration
+  STRIPE_BILLING_ADDRESS_COLLECTION: z.enum(['auto', 'required']).default('auto'),
+  STRIPE_TRIAL_PERIOD_DAYS: z.string().optional(),
+  STRIPE_TRIAL_END_REMINDER_DAYS: z.string().default('3'),
+
   // AWS Configuration
   AWS_REGION: z.string().default('us-east-1'),
   AWS_ACCESS_KEY_ID: z.string().optional(),
