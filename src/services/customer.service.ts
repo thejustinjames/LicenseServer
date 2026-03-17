@@ -1,13 +1,16 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { prisma } from '../config/database.js';
 import { stripe } from '../config/stripe.js';
 import { config } from '../config/index.js';
 import { Customer } from '@prisma/client';
 import type { CustomerWithoutPassword } from '../types/index.js';
 import * as emailService from './email.service.js';
+import { logger } from './logger.service.js';
 
 const SALT_ROUNDS = 12;
+const PASSWORD_RESET_EXPIRY_HOURS = 1;
 
 export interface CreateCustomerInput {
   email: string;
@@ -212,4 +215,138 @@ export async function ensureAdminExists(): Promise<void> {
     isAdmin: true,
   });
   console.log('Admin user created successfully');
+}
+
+/**
+ * Create a password reset token for a customer
+ * Returns the token if successful, null if customer not found
+ */
+export async function createPasswordResetToken(email: string): Promise<string | null> {
+  const customer = await prisma.customer.findUnique({
+    where: { email },
+  });
+
+  // Don't reveal whether the email exists
+  if (!customer) {
+    logger.info('Password reset requested for non-existent email');
+    return null;
+  }
+
+  // Invalidate any existing tokens
+  await prisma.passwordResetToken.updateMany({
+    where: {
+      customerId: customer.id,
+      usedAt: null,
+    },
+    data: {
+      usedAt: new Date(),
+    },
+  });
+
+  // Generate secure random token
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000);
+
+  await prisma.passwordResetToken.create({
+    data: {
+      token,
+      customerId: customer.id,
+      expiresAt,
+    },
+  });
+
+  logger.audit('password_reset_requested', {
+    customerId: customer.id,
+    success: true,
+  });
+
+  return token;
+}
+
+/**
+ * Verify a password reset token
+ * Returns the customer ID if valid, null otherwise
+ */
+export async function verifyPasswordResetToken(token: string): Promise<string | null> {
+  const resetToken = await prisma.passwordResetToken.findUnique({
+    where: { token },
+    include: { customer: true },
+  });
+
+  if (!resetToken) {
+    logger.warn('Invalid password reset token attempted');
+    return null;
+  }
+
+  if (resetToken.usedAt) {
+    logger.warn('Already used password reset token attempted', { customerId: resetToken.customerId });
+    return null;
+  }
+
+  if (resetToken.expiresAt < new Date()) {
+    logger.warn('Expired password reset token attempted', { customerId: resetToken.customerId });
+    return null;
+  }
+
+  return resetToken.customerId;
+}
+
+/**
+ * Reset password using a valid token
+ */
+export async function resetPassword(token: string, newPassword: string): Promise<boolean> {
+  const customerId = await verifyPasswordResetToken(token);
+
+  if (!customerId) {
+    return false;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+
+  // Update password and mark token as used
+  await prisma.$transaction([
+    prisma.customer.update({
+      where: { id: customerId },
+      data: { passwordHash },
+    }),
+    prisma.passwordResetToken.update({
+      where: { token },
+      data: { usedAt: new Date() },
+    }),
+  ]);
+
+  logger.audit('password_reset_completed', {
+    customerId,
+    success: true,
+  });
+
+  return true;
+}
+
+/**
+ * Send password reset email
+ */
+export async function sendPasswordResetEmailToCustomer(email: string, resetToken: string): Promise<boolean> {
+  const customer = await prisma.customer.findUnique({
+    where: { email },
+  });
+
+  if (!customer) {
+    return false;
+  }
+
+  const appUrl = process.env.APP_URL || 'http://localhost:3000';
+  const resetUrl = `${appUrl}/reset-password.html?token=${resetToken}`;
+
+  try {
+    return await emailService.sendPasswordResetEmail(
+      email,
+      customer.name || undefined,
+      resetUrl,
+      PASSWORD_RESET_EXPIRY_HOURS
+    );
+  } catch (error) {
+    logger.error('Failed to send password reset email', error);
+    return false;
+  }
 }

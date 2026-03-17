@@ -4,24 +4,101 @@ var token = localStorage.getItem('token'); // Backward compat during migration
 var user = JSON.parse(localStorage.getItem('user') || 'null');
 var productSearchTimeout = null;
 
+// CAPTCHA configuration
+var captchaConfig = {
+  enabled: false,
+  siteKey: null,
+  widgetIds: {}
+};
+var lastForgotEmail = null;
+
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
+  // Load CAPTCHA configuration
+  loadCaptchaConfig();
+
   // Bind all event listeners
   bindEvents();
 
   // Check authentication status from server (validates cookie)
   checkAuthStatus().then(function() {
-    loadCategories();
-    loadProducts();
-  });
+    // Check for success redirect from Stripe
+    var urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('session_id')) {
+      showSection('success');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
-  // Check for success redirect from Stripe
-  var urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('session_id')) {
-    showSection('success');
-    window.history.replaceState({}, document.title, window.location.pathname);
-  }
+    // If not authenticated, show login modal
+    if (!user) {
+      openAuthModal('login');
+    } else {
+      loadCategories();
+      loadProducts();
+    }
+  });
 });
+
+// Load CAPTCHA configuration from server
+function loadCaptchaConfig() {
+  api('/api/portal/auth/captcha-config')
+    .then(function(config) {
+      captchaConfig.enabled = config.enabled;
+      captchaConfig.siteKey = config.siteKey;
+    })
+    .catch(function(error) {
+      console.warn('Failed to load CAPTCHA config:', error);
+    });
+}
+
+// Render hCaptcha widget
+function renderCaptcha(containerId) {
+  if (!captchaConfig.enabled || !captchaConfig.siteKey) {
+    return;
+  }
+
+  var container = document.getElementById(containerId);
+  if (!container || container.children.length > 0) {
+    return; // Already rendered or container missing
+  }
+
+  // Wait for hCaptcha to load
+  if (typeof hcaptcha === 'undefined') {
+    setTimeout(function() { renderCaptcha(containerId); }, 100);
+    return;
+  }
+
+  try {
+    var widgetId = hcaptcha.render(containerId, {
+      sitekey: captchaConfig.siteKey,
+      theme: 'light'
+    });
+    captchaConfig.widgetIds[containerId] = widgetId;
+  } catch (e) {
+    console.warn('Failed to render hCaptcha:', e);
+  }
+}
+
+// Get CAPTCHA response token
+function getCaptchaToken(containerId) {
+  if (!captchaConfig.enabled) {
+    return null;
+  }
+
+  var widgetId = captchaConfig.widgetIds[containerId];
+  if (typeof hcaptcha !== 'undefined' && widgetId !== undefined) {
+    return hcaptcha.getResponse(widgetId);
+  }
+  return null;
+}
+
+// Reset CAPTCHA widget
+function resetCaptcha(containerId) {
+  var widgetId = captchaConfig.widgetIds[containerId];
+  if (typeof hcaptcha !== 'undefined' && widgetId !== undefined) {
+    hcaptcha.reset(widgetId);
+  }
+}
 
 // Check authentication status from server
 function checkAuthStatus() {
@@ -54,18 +131,41 @@ function bindEvents() {
     showSection('home');
   });
 
-  // Auth buttons
+  // Auth buttons - open modal
   document.getElementById('loginBtn').addEventListener('click', function() {
-    showSection('login');
+    openAuthModal('login');
   });
 
   document.getElementById('signupBtn').addEventListener('click', function() {
-    showSection('register');
+    openAuthModal('register');
   });
 
   document.getElementById('heroSignupBtn').addEventListener('click', function() {
-    showSection('register');
+    openAuthModal('register');
   });
+
+  // Modal close button
+  document.getElementById('closeAuthModal').addEventListener('click', function() {
+    closeAuthModal();
+  });
+
+  // Close modal on backdrop click
+  document.querySelector('.modal-backdrop').addEventListener('click', function() {
+    closeAuthModal();
+  });
+
+  // Close modal on Escape key
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      closeAuthModal();
+    }
+  });
+
+  // Social login buttons (placeholder - show coming soon)
+  document.getElementById('googleLoginBtn').addEventListener('click', handleSocialLogin);
+  document.getElementById('facebookLoginBtn').addEventListener('click', handleSocialLogin);
+  document.getElementById('googleSignupBtn').addEventListener('click', handleSocialLogin);
+  document.getElementById('facebookSignupBtn').addEventListener('click', handleSocialLogin);
 
   // User nav
   document.getElementById('dashboardBtn').addEventListener('click', function() {
@@ -76,18 +176,46 @@ function bindEvents() {
     logout();
   });
 
-  // Auth form switches
-  document.getElementById('switchToRegister').addEventListener('click', function() {
-    showSection('register');
+  // Auth form switches within modal
+  document.getElementById('switchToRegister').addEventListener('click', function(e) {
+    e.preventDefault();
+    showAuthView('register');
   });
 
-  document.getElementById('switchToLogin').addEventListener('click', function() {
-    showSection('login');
+  document.getElementById('switchToLogin').addEventListener('click', function(e) {
+    e.preventDefault();
+    showAuthView('login');
+  });
+
+  // Forgot password link
+  document.getElementById('forgotPasswordLink').addEventListener('click', function(e) {
+    e.preventDefault();
+    showAuthView('forgotPassword');
+  });
+
+  // Back to login from forgot password
+  document.getElementById('backToLogin').addEventListener('click', function(e) {
+    e.preventDefault();
+    showAuthView('login');
+  });
+
+  // Back to login from reset email sent
+  document.getElementById('backToLoginFromReset').addEventListener('click', function(e) {
+    e.preventDefault();
+    showAuthView('login');
+  });
+
+  // Resend reset email
+  document.getElementById('resendResetEmail').addEventListener('click', function() {
+    if (lastForgotEmail) {
+      handleForgotPasswordSubmit(lastForgotEmail);
+    }
   });
 
   // Forms
   document.getElementById('loginForm').addEventListener('submit', handleLogin);
   document.getElementById('registerForm').addEventListener('submit', handleRegister);
+  document.getElementById('forgotPasswordForm').addEventListener('submit', handleForgotPassword);
 
   // Password toggle
   document.getElementById('togglePassword').addEventListener('click', function() {
@@ -133,9 +261,81 @@ function showSection(sectionId) {
   }
   document.getElementById(sectionId).classList.add('active');
 
-  if (sectionId === 'dashboard' && token) {
+  if (sectionId === 'dashboard' && user) {
     loadDashboard();
   }
+}
+
+// Auth Modal Functions
+function openAuthModal(view) {
+  var modal = document.getElementById('authModal');
+  var closeBtn = document.getElementById('closeAuthModal');
+
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden'; // Prevent background scrolling
+
+  // Hide close button if login is required (not authenticated)
+  if (!user) {
+    closeBtn.classList.add('hidden');
+  } else {
+    closeBtn.classList.remove('hidden');
+  }
+
+  showAuthView(view || 'login');
+}
+
+function closeAuthModal() {
+  // Don't allow closing if not authenticated
+  if (!user) {
+    return;
+  }
+
+  var modal = document.getElementById('authModal');
+  modal.classList.add('hidden');
+  document.body.style.overflow = ''; // Restore scrolling
+  // Clear any error messages
+  document.getElementById('loginAlert').innerHTML = '';
+  document.getElementById('registerAlert').innerHTML = '';
+  document.getElementById('forgotPasswordAlert').innerHTML = '';
+}
+
+function showAuthView(view) {
+  var views = ['loginView', 'registerView', 'forgotPasswordView', 'resetEmailSentView'];
+
+  // Hide all views
+  views.forEach(function(viewId) {
+    var el = document.getElementById(viewId);
+    if (el) el.classList.add('hidden');
+  });
+
+  // Show the requested view
+  var viewMap = {
+    'login': 'loginView',
+    'register': 'registerView',
+    'forgotPassword': 'forgotPasswordView',
+    'resetEmailSent': 'resetEmailSentView'
+  };
+
+  var targetView = document.getElementById(viewMap[view] || 'loginView');
+  if (targetView) {
+    targetView.classList.remove('hidden');
+  }
+
+  // Render CAPTCHA for views that need it
+  if (view === 'register') {
+    renderCaptcha('registerCaptcha');
+  } else if (view === 'forgotPassword') {
+    renderCaptcha('forgotCaptcha');
+  }
+}
+
+// Social Login Handler (placeholder)
+function handleSocialLogin(e) {
+  var provider = e.target.closest('.btn-google') ? 'Google' : 'Facebook';
+  var alertEl = document.getElementById('loginView').classList.contains('hidden')
+    ? document.getElementById('registerAlert')
+    : document.getElementById('loginAlert');
+  alertEl.innerHTML = '<div class="alert alert-info">' + provider + ' login coming soon!</div>';
 }
 
 // Auth UI
@@ -145,7 +345,7 @@ function updateAuthUI() {
   var userEmail = document.getElementById('userEmail');
   var adminLink = document.getElementById('adminLink');
 
-  if (token && user) {
+  if (user) {
     authNav.classList.add('hidden');
     userNav.classList.remove('hidden');
     userEmail.textContent = user.email;
@@ -294,7 +494,17 @@ function handleLogin(event) {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
     updateAuthUI();
-    showSection('dashboard');
+
+    // Close modal (now allowed since user is set)
+    var modal = document.getElementById('authModal');
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+    alertEl.innerHTML = '';
+
+    // Load data now that user is authenticated
+    loadCategories();
+    loadProducts();
+    showSection('home');
   })
   .catch(function(error) {
     alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
@@ -308,10 +518,22 @@ function handleRegister(event) {
   var name = document.getElementById('registerName').value;
   var email = document.getElementById('registerEmail').value;
   var password = document.getElementById('registerPassword').value;
+  var captchaToken = getCaptchaToken('registerCaptcha');
+
+  // Check CAPTCHA if enabled
+  if (captchaConfig.enabled && !captchaToken) {
+    alertEl.innerHTML = '<div class="alert alert-error">Please complete the CAPTCHA verification</div>';
+    return;
+  }
+
+  var requestBody = { name: name, email: email, password: password };
+  if (captchaToken) {
+    requestBody.captchaToken = captchaToken;
+  }
 
   api('/api/portal/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ name: name, email: email, password: password })
+    body: JSON.stringify(requestBody)
   })
   .then(function(data) {
     token = data.token;
@@ -319,10 +541,59 @@ function handleRegister(event) {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
     updateAuthUI();
-    showSection('dashboard');
+
+    // Close modal (now allowed since user is set)
+    var modal = document.getElementById('authModal');
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+    alertEl.innerHTML = '';
+
+    // Load data now that user is authenticated
+    loadCategories();
+    loadProducts();
+    showSection('home');
   })
   .catch(function(error) {
     alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
+    resetCaptcha('registerCaptcha');
+  });
+}
+
+// Handle Forgot Password
+function handleForgotPassword(event) {
+  event.preventDefault();
+  var email = document.getElementById('forgotEmail').value;
+  handleForgotPasswordSubmit(email);
+}
+
+function handleForgotPasswordSubmit(email) {
+  var alertEl = document.getElementById('forgotPasswordAlert');
+  var captchaToken = getCaptchaToken('forgotCaptcha');
+
+  // Check CAPTCHA if enabled
+  if (captchaConfig.enabled && !captchaToken) {
+    alertEl.innerHTML = '<div class="alert alert-error">Please complete the CAPTCHA verification</div>';
+    return;
+  }
+
+  var requestBody = { email: email };
+  if (captchaToken) {
+    requestBody.captchaToken = captchaToken;
+  }
+
+  // Save email for resend
+  lastForgotEmail = email;
+
+  api('/api/portal/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify(requestBody)
+  })
+  .then(function(data) {
+    showAuthView('resetEmailSent');
+  })
+  .catch(function(error) {
+    alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
+    resetCaptcha('forgotCaptcha');
   });
 }
 
@@ -340,14 +611,16 @@ function logout() {
       localStorage.removeItem('user');
       updateAuthUI();
       showSection('home');
+      // Show login modal since authentication is required
+      openAuthModal('login');
     });
 }
 
 // Checkout
 function checkout(productId) {
   console.log('Checkout for product:', productId);
-  if (!token) {
-    showSection('login');
+  if (!user) {
+    openAuthModal('login');
     return;
   }
 

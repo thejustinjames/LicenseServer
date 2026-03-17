@@ -19,7 +19,8 @@ type EmailTemplate =
   | 'refund_processed'
   | 'license_activated'
   | 'license_revoked'
-  | 'subscription_canceled';
+  | 'subscription_canceled'
+  | 'password_reset';
 
 interface EmailData {
   to: string;
@@ -243,6 +244,30 @@ function getEmailContent(template: EmailTemplate, data: Record<string, string | 
         `,
       };
 
+    case 'password_reset':
+      return {
+        subject: `Reset Your Password`,
+        body: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #2563eb;">Password Reset Request</h1>
+            <p>Hi ${data.name || 'there'},</p>
+            <p>We received a request to reset your password. Click the button below to create a new password:</p>
+            <p style="margin: 24px 0;">
+              <a href="${data.resetUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">
+                Reset Password
+              </a>
+            </p>
+            <p>This link will expire in ${data.expiryHours || 1} hour(s).</p>
+            <p>If you didn't request this, you can safely ignore this email.</p>
+            <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
+              If the button doesn't work, copy and paste this link into your browser:<br>
+              <a href="${data.resetUrl}">${data.resetUrl}</a>
+            </p>
+            <p>Best regards,<br>The ${appName} Team</p>
+          </div>
+        `,
+      };
+
     default:
       return {
         subject: `Notification from ${appName}`,
@@ -350,5 +375,19 @@ export async function sendSubscriptionCanceledEmail(
     toName: name,
     template: 'subscription_canceled',
     data: { name, productName, periodEnd },
+  });
+}
+
+export async function sendPasswordResetEmail(
+  to: string,
+  name: string | undefined,
+  resetUrl: string,
+  expiryHours: number = 1
+): Promise<boolean> {
+  return sendEmail({
+    to,
+    toName: name,
+    template: 'password_reset',
+    data: { name, resetUrl, expiryHours },
   });
 }

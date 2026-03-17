@@ -63,9 +63,10 @@ model Customer {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  licenses      License[]
-  subscriptions Subscription[]
-  refunds       Refund[]
+  licenses            License[]
+  subscriptions       Subscription[]
+  refunds             Refund[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("customers")
 }
@@ -166,4 +167,20 @@ model Refund {
 
   @@index([customerId])
   @@map("refunds")
+}
+
+// Password reset tokens
+model PasswordResetToken {
+  id         String   @id @default(uuid())
+  token      String   @unique
+  customerId String   @map("customer_id")
+  expiresAt  DateTime @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([token])
+  @@map("password_reset_tokens")
 }

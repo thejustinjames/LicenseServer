@@ -7,6 +7,7 @@ import * as licenseService from '../services/license.service.js';
 import * as paymentService from '../services/payment.service.js';
 import * as storageService from '../services/storage.service.js';
 import * as productService from '../services/product.service.js';
+import * as captchaService from '../services/captcha.service.js';
 import { passwordSchema, getPasswordRequirementsText } from '../utils/password.js';
 import { JWTAuthProvider } from '../auth/jwt.auth.js';
 import { logger } from '../services/logger.service.js';
@@ -52,11 +53,22 @@ const registerSchema = z.object({
   email: z.string().email(),
   password: passwordSchema,
   name: z.string().max(100).optional(),
+  captchaToken: z.string().optional(),
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string(),
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+  captchaToken: z.string().optional(),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: passwordSchema,
 });
 
 // Password requirements endpoint
@@ -66,10 +78,28 @@ router.get('/auth/password-requirements', (_req, res: Response) => {
   });
 });
 
+// CAPTCHA configuration endpoint
+router.get('/auth/captcha-config', (_req, res: Response) => {
+  res.json({
+    enabled: captchaService.isCaptchaEnabled(),
+    siteKey: captchaService.getCaptchaSiteKey(),
+  });
+});
+
 // Auth routes (no authentication required)
 router.post('/auth/register', authRateLimit, async (req, res: Response) => {
   try {
     const data = registerSchema.parse(req.body);
+
+    // Verify CAPTCHA if enabled
+    if (captchaService.isCaptchaEnabled()) {
+      const captchaValid = await captchaService.verifyCaptcha(data.captchaToken);
+      if (!captchaValid) {
+        res.status(400).json({ error: 'CAPTCHA verification failed. Please try again.' });
+        return;
+      }
+    }
+
     const customer = await customerService.createCustomer(data);
     const auth = await customerService.authenticateCustomer(data.email, data.password);
 
@@ -158,6 +188,94 @@ router.post('/auth/logout', authenticate, async (req: AuthenticatedRequest, res:
   } catch (error) {
     logger.error('Logout error', error);
     res.status(500).json({ error: 'Failed to logout' });
+  }
+});
+
+// Forgot password - request reset email
+router.post('/auth/forgot-password', authRateLimit, async (req, res: Response) => {
+  try {
+    const data = forgotPasswordSchema.parse(req.body);
+
+    // Verify CAPTCHA if enabled
+    if (captchaService.isCaptchaEnabled()) {
+      const captchaValid = await captchaService.verifyCaptcha(data.captchaToken);
+      if (!captchaValid) {
+        res.status(400).json({ error: 'CAPTCHA verification failed. Please try again.' });
+        return;
+      }
+    }
+
+    const resetToken = await customerService.createPasswordResetToken(data.email);
+
+    // Always return success to prevent email enumeration
+    if (resetToken) {
+      // Send reset email (don't await to prevent timing attacks)
+      customerService.sendPasswordResetEmailToCustomer(data.email, resetToken).catch((err) => {
+        logger.error('Failed to send password reset email', err);
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'If an account with that email exists, we sent a password reset link.',
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Please enter a valid email address' });
+      return;
+    }
+    logger.error('Forgot password error', error);
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+// Verify reset token (check if token is valid before showing reset form)
+router.get('/auth/verify-reset-token', async (req, res: Response) => {
+  try {
+    const token = req.query.token as string;
+
+    if (!token) {
+      res.status(400).json({ valid: false, error: 'Token is required' });
+      return;
+    }
+
+    const customerId = await customerService.verifyPasswordResetToken(token);
+
+    if (!customerId) {
+      res.status(400).json({ valid: false, error: 'Invalid or expired token' });
+      return;
+    }
+
+    res.json({ valid: true });
+  } catch (error) {
+    logger.error('Verify reset token error', error);
+    res.status(500).json({ valid: false, error: 'Failed to verify token' });
+  }
+});
+
+// Reset password with token
+router.post('/auth/reset-password', authRateLimit, async (req, res: Response) => {
+  try {
+    const data = resetPasswordSchema.parse(req.body);
+
+    const success = await customerService.resetPassword(data.token, data.password);
+
+    if (!success) {
+      res.status(400).json({ error: 'Invalid or expired reset link. Please request a new one.' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully. You can now log in with your new password.',
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Reset password error', error);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 

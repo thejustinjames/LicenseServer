@@ -161,12 +161,70 @@
   - CLI tool included
   - Async runtime
 
+## Phase 12: Security Hardening
+- [x] httpOnly cookie authentication (SameSite=Strict, Secure in production)
+- [x] Token revocation/blacklist mechanism (Redis-backed with in-memory fallback)
+- [x] Redis-backed distributed rate limiting
+- [x] Strong password requirements (12+ chars, uppercase, lowercase, number, special char)
+- [x] Structured logging with pino (JSON in prod, pretty in dev)
+- [x] PII redaction in logs (customer IDs instead of emails)
+- [x] Request correlation IDs for debugging
+- [x] Constant-time password comparison (timing attack prevention)
+- [x] Webhook idempotency (duplicate event prevention)
+- [x] Webhook rate limiting (100 req/min)
+- [x] Generic error messages (no internal details leaked)
+- [x] Event delegation (replaced inline onclick handlers)
+- [x] Security documentation (`docs/SECURITY.md`)
+
+## Phase 13: Authentication UI & Password Reset
+- [x] Modern login modal with backdrop blur
+- [x] Required authentication (modal appears on page load if not logged in)
+- [x] Password reset flow:
+  - Forgot password form with email input
+  - Password reset token generation (1 hour expiry)
+  - Reset token verification endpoint
+  - Password reset with new password validation
+  - Reset confirmation page (`/reset-password.html`)
+  - Password reset email template
+- [x] CAPTCHA support (hCaptcha):
+  - Server-side verification service
+  - CAPTCHA on registration form
+  - CAPTCHA on forgot password form
+  - Graceful fallback when not configured
+- [x] Social login buttons (UI ready):
+  - Google login button
+  - Facebook login button
+  - Backend OAuth pending
+- [x] Legal pages:
+  - Terms of Service (`/terms.html`)
+  - Privacy Policy (`/privacy.html`)
+- [x] Site footer:
+  - Product links section
+  - Company links section
+  - Legal links section
+  - Social media icons
+- [x] AWS hosting documentation (`docs/AWS-HOSTING.md`):
+  - Architecture diagrams (4 options)
+  - Terraform example code
+  - GitHub Actions CI/CD pipeline
+  - Cost estimates
+  - Security checklist
+
 ---
 
 ## Changelog
 
 | Date | Task | Phase |
 |------|------|-------|
+| 2026-03-17 | AWS hosting documentation | Phase 13 |
+| 2026-03-17 | Required login modal | Phase 13 |
+| 2026-03-17 | CAPTCHA support (hCaptcha) | Phase 13 |
+| 2026-03-17 | Password reset flow | Phase 13 |
+| 2026-03-17 | Terms & Privacy pages | Phase 13 |
+| 2026-03-17 | Site footer with legal links | Phase 13 |
+| 2026-03-17 | Social login buttons (UI) | Phase 13 |
+| 2026-03-17 | Modern login modal UI | Phase 13 |
+| 2026-03-17 | Security hardening (cookies, Redis, logging) | Phase 12 |
 | 2026-03-17 | Kubernetes MinIO + PostgreSQL deployments | Phase 9 |
 | 2026-03-17 | S3/MinIO download integration with configurable expiry | Phase 5, 6 |
 | 2026-03-17 | Product download configuration in admin panel | Phase 6 |
@@ -206,11 +264,26 @@ License Server
 │   ├── middleware/     # Auth, rate limiting
 │   ├── routes/         # API endpoints
 │   ├── services/       # Business logic
+│   │   ├── captcha.service.ts   # hCaptcha verification
+│   │   ├── email.service.ts     # Microsoft Graph emails
+│   │   └── logger.service.ts    # Pino structured logging
 │   ├── types/          # TypeScript types
-│   └── utils/          # Helpers (license keys, crypto)
+│   └── utils/          # Helpers (license keys, crypto, password)
 ├── public/             # Frontend SPA
+│   ├── index.html      # Main app with auth modal
+│   ├── admin.html      # Admin dashboard
+│   ├── reset-password.html  # Password reset page
+│   ├── terms.html      # Terms of Service
+│   ├── privacy.html    # Privacy Policy
+│   ├── app.js          # Main app logic
+│   ├── admin.js        # Admin dashboard logic
+│   └── styles.css      # Shared styles
 ├── prisma/             # Database schema
 ├── k8s/                # Kubernetes manifests
+├── docs/               # Documentation
+│   ├── DEPLOYMENT.md   # Production deployment guide
+│   ├── SECURITY.md     # Security documentation
+│   └── AWS-HOSTING.md  # AWS architecture diagrams
 ├── clients/            # SDK implementations
 │   ├── node/
 │   ├── swift/
@@ -228,6 +301,14 @@ License Server
 | `/api/v1/validate` | POST | No | Validate license |
 | `/api/v1/activate` | POST | No | Activate license |
 | `/api/v1/deactivate` | POST | No | Deactivate license |
+| `/api/portal/auth/register` | POST | No | User registration |
+| `/api/portal/auth/login` | POST | No | User login |
+| `/api/portal/auth/logout` | POST | JWT | User logout |
+| `/api/portal/auth/forgot-password` | POST | No | Request password reset |
+| `/api/portal/auth/verify-reset-token` | GET | No | Verify reset token |
+| `/api/portal/auth/reset-password` | POST | No | Reset password |
+| `/api/portal/auth/captcha-config` | GET | No | Get CAPTCHA config |
+| `/api/portal/auth/password-requirements` | GET | No | Get password rules |
 | `/api/portal/*` | * | JWT | Customer portal |
 | `/api/admin/*` | * | JWT+Admin | Admin operations |
 | `/webhooks/stripe` | POST | Stripe sig | Webhook handler |

@@ -41,7 +41,8 @@
 - [ ] License transfer between customers
 - [ ] Multi-currency support
 - [ ] Webhook retry queue with dead letter handling
-- [ ] Structured logging (winston/pino)
+- [x] Structured logging (winston/pino)
+- [ ] OAuth social login (Google, Facebook) - UI ready, backend pending
 
 ---
 
@@ -50,6 +51,15 @@
 See [COMPLETED.md](./COMPLETED.md) for full details on implemented features.
 
 ### Recently Completed
+- [x] **Authentication & UI Improvements (2026-03-17)**
+  - [x] Modern login modal with required authentication
+  - [x] Password reset flow (forgot password, email, reset page)
+  - [x] CAPTCHA support (hCaptcha integration)
+  - [x] Terms of Service page (`/terms.html`)
+  - [x] Privacy Policy page (`/privacy.html`)
+  - [x] Footer with legal links and social icons
+  - [x] Social login buttons (UI ready - Google, Facebook)
+  - [x] AWS hosting documentation (`docs/AWS-HOSTING.md`)
 - [x] **Security Hardening (2026-03-17)**
   - [x] httpOnly cookie authentication (SameSite=Strict, Secure)
   - [x] Token revocation/blacklist with Redis support
