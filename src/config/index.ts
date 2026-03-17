@@ -59,6 +59,14 @@ const envSchema = z.object({
   // Offline License Signing
   LICENSE_PRIVATE_KEY_PATH: z.string().optional(),
   LICENSE_PUBLIC_KEY_PATH: z.string().optional(),
+
+  // Email Service (Microsoft Graph / Office 365)
+  AZURE_TENANT_ID: z.string().optional(),
+  AZURE_CLIENT_ID: z.string().optional(),
+  AZURE_CLIENT_SECRET: z.string().optional(),
+  EMAIL_SENDER: z.string().email().optional(),
+  APP_NAME: z.string().default('License Server'),
+  SUPPORT_EMAIL: z.string().email().optional(),
 });
 
 function loadConfig() {

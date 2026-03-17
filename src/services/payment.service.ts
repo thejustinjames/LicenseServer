@@ -4,6 +4,7 @@ import { config } from '../config/index.js';
 import * as customerService from './customer.service.js';
 import * as licenseService from './license.service.js';
 import * as productService from './product.service.js';
+import * as emailService from './email.service.js';
 import Stripe from 'stripe';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -298,6 +299,7 @@ export async function handleSubscriptionDeleted(subscription: Stripe.Subscriptio
 
 export async function handleInvoicePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   const subscriptionId = invoice.subscription as string;
+  const stripeCustomerId = invoice.customer as string;
 
   if (!subscriptionId) {
     return;
@@ -309,6 +311,31 @@ export async function handleInvoicePaymentFailed(invoice: Stripe.Invoice): Promi
   });
 
   await licenseService.suspendLicensesForSubscription(subscriptionId);
+
+  // Send payment failed notification email
+  if (stripeCustomerId) {
+    const customer = await prisma.customer.findUnique({
+      where: { stripeCustomerId },
+    });
+
+    if (customer) {
+      // Get product name from subscription metadata or invoice
+      const productName = invoice.lines?.data?.[0]?.description || 'your subscription';
+
+      // Create billing portal URL for the customer
+      try {
+        const portalUrl = await createBillingPortalSession(customer.id);
+        await emailService.sendPaymentFailedEmail(
+          customer.email,
+          customer.name || undefined,
+          productName,
+          portalUrl
+        );
+      } catch (error) {
+        console.error('Failed to send payment failed email:', error);
+      }
+    }
+  }
 }
 
 /**
@@ -390,6 +417,15 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
   } else {
     console.log(`Partial refund of ${refundAmount} cents processed for customer ${customer.email}`);
   }
+
+  // Send refund notification email
+  await emailService.sendRefundProcessedEmail(
+    customer.email,
+    customer.name || undefined,
+    refundAmount,
+    charge.currency,
+    isFullRefund
+  );
 }
 
 /**
@@ -427,9 +463,23 @@ export async function handleTrialWillEnd(subscription: Stripe.Subscription): Pro
     },
   });
 
-  // Here you could trigger an email notification or other action
-  // For now, we'll just log it. Integration with email service can be added.
-  // Example: await emailService.sendTrialEndingEmail(customer, daysRemaining);
+  // Get product name for the email
+  const productId = subscription.metadata?.productId;
+  let productName = 'your subscription';
+  if (productId) {
+    const product = await productService.getProductById(productId);
+    if (product) {
+      productName = product.name;
+    }
+  }
+
+  // Send trial ending notification email
+  await emailService.sendTrialEndingEmail(
+    customer.email,
+    customer.name || undefined,
+    productName,
+    daysRemaining
+  );
 }
 
 // ============================================================================

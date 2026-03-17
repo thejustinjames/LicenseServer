@@ -5,6 +5,7 @@ import { stripe } from '../config/stripe.js';
 import { config } from '../config/index.js';
 import { Customer } from '@prisma/client';
 import type { CustomerWithoutPassword } from '../types/index.js';
+import * as emailService from './email.service.js';
 
 const SALT_ROUNDS = 12;
 
@@ -57,6 +58,13 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
       stripeCustomerId,
     },
   });
+
+  // Send welcome email (don't await - fire and forget)
+  if (!input.isAdmin) {
+    emailService.sendWelcomeEmail(customer.email, customer.name || undefined).catch((err) => {
+      console.error('Failed to send welcome email:', err);
+    });
+  }
 
   return omitPassword(customer);
 }

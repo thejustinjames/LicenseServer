@@ -2,6 +2,7 @@ import { prisma } from '../config/database.js';
 import { License, LicenseStatus, LicenseActivation, Prisma } from '@prisma/client';
 import { generateLicenseKey, validateLicenseKeyFormat } from '../utils/license-key.js';
 import { generateOfflineLicenseToken } from '../utils/crypto.js';
+import * as emailService from './email.service.js';
 import type { LicenseValidationResponse, OfflineLicensePayload } from '../types/index.js';
 
 export interface CreateLicenseInput {
@@ -204,6 +205,18 @@ export async function activateLicense(
       machineName,
       ipAddress,
     },
+  });
+
+  // Send license activated email (fire and forget)
+  emailService.sendLicenseActivatedEmail(
+    license.customer.email,
+    license.customer.name || undefined,
+    license.product.name,
+    licenseKey,
+    machineName,
+    license.expiresAt?.toLocaleDateString()
+  ).catch((err) => {
+    console.error('Failed to send license activated email:', err);
   });
 
   return { success: true, activation };

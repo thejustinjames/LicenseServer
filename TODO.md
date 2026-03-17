@@ -2,30 +2,38 @@
 
 ## Remaining Tasks
 
-### Offline License Support
-- [ ] Generate RSA key pair for offline license signing (`keys/private.pem`, `keys/public.pem`)
-- [ ] Document client-side offline license validation
-
 ### Testing
-- [ ] Add unit tests for services
-- [ ] Add integration tests for APIs
+- [ ] Add integration tests for API endpoints
 - [ ] Add E2E tests for Stripe checkout flow
+- [ ] Add load testing scripts
 
-### Production Deployment
-- [ ] Production deployment documentation
-- [ ] CI/CD pipeline setup
-- [ ] Monitoring and alerting setup
-- [ ] Rate limiting fine-tuning for production
+### CI/CD Pipeline
+- [ ] Set up GitHub Actions workflow
+- [ ] Automated testing on PR
+- [ ] Automated deployment to staging
+- [ ] Docker image build and push
+
+### Monitoring & Alerting
+- [ ] CloudWatch/Datadog integration
+- [ ] Error tracking (Sentry)
+- [ ] Performance monitoring
+- [ ] Alert rules for critical metrics
 
 ### Optional Enhancements
-- [ ] Email notifications (trial ending, payment failed, refund processed)
 - [ ] Admin dashboard UI (currently API-only)
 - [ ] License transfer between customers
 - [ ] Multi-currency support
 - [ ] Webhook retry queue with dead letter handling
+- [ ] Rate limiting with Redis (for distributed deployment)
 
 ---
 
-## Completed Phases
+## Completed
 
 See [COMPLETED.md](./COMPLETED.md) for full details on implemented features.
+
+### Recently Completed
+- [x] RSA key generation for offline licensing
+- [x] Microsoft Graph email service (Office 365)
+- [x] Unit tests with Vitest
+- [x] Production deployment documentation

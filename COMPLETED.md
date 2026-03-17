@@ -77,14 +77,15 @@
 - [x] RSA key loading infrastructure
 - [x] Signed license token generation endpoint
 - [x] Offline license payload structure defined
-- [ ] RSA key pair generation (pending)
+- [x] RSA key pair generation (`keys/private.pem`, `keys/public.pem`)
 
 ## Phase 8: Testing & Deployment
 - [x] Docker Compose configuration
 - [x] Dockerfile with multi-stage build (node:20-alpine)
 - [x] Manual API testing completed
 - [x] Stripe webhook testing with CLI
-- [ ] Automated tests (pending)
+- [x] Unit tests with Vitest (25 tests passing)
+- [x] Production deployment documentation (`docs/DEPLOYMENT.md`)
 
 ## Phase 9: AWS Enterprise Features
 - [x] Config provider system (env, secrets-manager, kubernetes)
@@ -108,7 +109,21 @@
   - HorizontalPodAutoscaler
 - [x] Enhanced health checks (liveness + readiness with DB check)
 
-## Phase 10: Client SDKs
+## Phase 10: Email Notifications (Microsoft Graph / Office 365)
+- [x] Microsoft Graph API integration
+- [x] Email service with template system
+- [x] Email templates:
+  - Welcome email on registration
+  - Trial ending notification
+  - Payment failed alert
+  - Refund processed confirmation
+  - License activated notification
+  - License revoked notification
+  - Subscription canceled notification
+- [x] Automatic email sending on events (registration, activation, refund)
+- [x] Graceful degradation when not configured
+
+## Phase 11: Client SDKs
 - [x] Node.js/TypeScript SDK (`clients/node/`)
   - Online validation with caching
   - Machine fingerprinting
@@ -134,6 +149,10 @@
 
 | Date | Task | Phase |
 |------|------|-------|
+| 2026-03-17 | Production deployment documentation | Phase 8 |
+| 2026-03-17 | Unit tests with Vitest (25 tests) | Phase 8 |
+| 2026-03-17 | Microsoft Graph email service | Phase 10 |
+| 2026-03-17 | RSA key generation for offline licensing | Phase 7 |
 | 2026-03-17 | Refund webhook with license revocation | Phase 3 |
 | 2026-03-17 | Success page icon improvement | Phase 6 |
 | 2026-03-17 | Password visibility toggle | Phase 6 |

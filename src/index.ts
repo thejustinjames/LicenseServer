@@ -9,6 +9,7 @@ import { ensureAdminExists } from './services/customer.service.js';
 import { getCorsConfig, isCorsEnabled } from './config/cors.js';
 import { initializeAuthProvider } from './auth/index.js';
 import { initializeConfigProvider } from './config/providers/index.js';
+import { initializeEmailService } from './services/email.service.js';
 
 import adminRoutes from './routes/admin.js';
 import portalRoutes from './routes/portal.js';
@@ -174,6 +175,9 @@ async function start() {
 
     // Initialize auth provider (supports jwt, cognito)
     await initializeAuthProvider();
+
+    // Initialize email service (Microsoft Graph / Office 365)
+    initializeEmailService();
 
     await connectDatabase();
     await ensureAdminExists();
