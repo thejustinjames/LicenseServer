@@ -18,6 +18,7 @@ router.use(requireAdmin);
 const createProductSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
+  category: z.string().optional(),
   validationMode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']).optional(),
   pricingType: z.enum(['FIXED', 'METERED']).optional(),
   licenseDurationDays: z.number().positive().optional(),
@@ -39,6 +40,7 @@ const createProductSchema = z.object({
 const updateProductSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
+  category: z.string().nullable().optional(),
   validationMode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']).optional(),
   licenseDurationDays: z.number().positive().nullable().optional(),
   s3PackageKey: z.string().optional(),
@@ -78,13 +80,25 @@ router.post('/products', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-router.get('/products', async (_req: AuthenticatedRequest, res: Response) => {
+router.get('/products', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const products = await productService.listProducts();
+    const search = req.query.search as string | undefined;
+    const category = req.query.category as string | undefined;
+    const products = await productService.listProducts({ search, category });
     res.json(products);
   } catch (error) {
     console.error('List products error:', error);
     res.status(500).json({ error: 'Failed to list products' });
+  }
+});
+
+router.get('/products/categories', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const categories = await productService.listCategories();
+    res.json(categories);
+  } catch (error) {
+    console.error('List categories error:', error);
+    res.status(500).json({ error: 'Failed to list categories' });
   }
 });
 

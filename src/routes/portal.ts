@@ -1,25 +1,31 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, getAuthProvider } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rateLimit.js';
 import * as customerService from '../services/customer.service.js';
 import * as licenseService from '../services/license.service.js';
 import * as paymentService from '../services/payment.service.js';
 import * as storageService from '../services/storage.service.js';
 import * as productService from '../services/product.service.js';
+import { passwordSchema, getPasswordRequirementsText } from '../utils/password.js';
+import { JWTAuthProvider } from '../auth/jwt.auth.js';
+import { logger } from '../services/logger.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 const router = Router();
 
 // Public routes (no authentication required)
-router.get('/products', async (_req, res: Response) => {
+router.get('/products', async (req, res: Response) => {
   try {
-    const products = await productService.listProducts();
+    const search = req.query.search as string | undefined;
+    const category = req.query.category as string | undefined;
+    const products = await productService.listProducts({ search, category });
     // Return only public product info (no sensitive data)
     const publicProducts = products.map(p => ({
       id: p.id,
       name: p.name,
       description: p.description,
+      category: p.category,
       features: p.features,
       pricingType: p.pricingType,
       hasStripePrice: !!p.stripePriceId,
@@ -31,16 +37,33 @@ router.get('/products', async (_req, res: Response) => {
   }
 });
 
+router.get('/products/categories', async (_req, res: Response) => {
+  try {
+    const categories = await productService.listCategories();
+    res.json(categories);
+  } catch (error) {
+    console.error('List categories error:', error);
+    res.status(500).json({ error: 'Failed to list categories' });
+  }
+});
+
 // Auth schemas
 const registerSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8),
-  name: z.string().optional(),
+  password: passwordSchema,
+  name: z.string().max(100).optional(),
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string(),
+});
+
+// Password requirements endpoint
+router.get('/auth/password-requirements', (_req, res: Response) => {
+  res.json({
+    requirements: getPasswordRequirementsText(),
+  });
 });
 
 // Auth routes (no authentication required)
@@ -55,9 +78,20 @@ router.post('/auth/register', authRateLimit, async (req, res: Response) => {
       return;
     }
 
+    // Set httpOnly cookie
+    const authProvider = getAuthProvider();
+    if (authProvider instanceof JWTAuthProvider) {
+      authProvider.setAuthCookie(res, auth.token);
+    }
+
+    logger.audit('register', {
+      customerId: auth.customer.id,
+      success: true,
+    });
+
     res.status(201).json({
       customer: auth.customer,
-      token: auth.token,
+      token: auth.token, // Also return token for backward compatibility
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -65,10 +99,10 @@ router.post('/auth/register', authRateLimit, async (req, res: Response) => {
       return;
     }
     if (error instanceof Error && error.message.includes('already exists')) {
-      res.status(409).json({ error: error.message });
+      res.status(409).json({ error: 'An account with this email already exists' });
       return;
     }
-    console.error('Register error:', error);
+    logger.error('Register error', error);
     res.status(500).json({ error: 'Failed to register' });
   }
 });
@@ -79,21 +113,51 @@ router.post('/auth/login', authRateLimit, async (req, res: Response) => {
     const auth = await customerService.authenticateCustomer(data.email, data.password);
 
     if (!auth) {
+      logger.audit('login', {
+        success: false,
+        details: { email: data.email },
+      });
       res.status(401).json({ error: 'Invalid email or password' });
       return;
     }
 
+    // Set httpOnly cookie
+    const authProvider = getAuthProvider();
+    if (authProvider instanceof JWTAuthProvider) {
+      authProvider.setAuthCookie(res, auth.token);
+    }
+
+    logger.audit('login', {
+      customerId: auth.customer.id,
+      success: true,
+    });
+
     res.json({
       customer: auth.customer,
-      token: auth.token,
+      token: auth.token, // Also return token for backward compatibility
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Login error:', error);
+    logger.error('Login error', error);
     res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+// Logout route
+router.post('/auth/logout', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const authProvider = getAuthProvider();
+    if (authProvider instanceof JWTAuthProvider) {
+      await authProvider.logout(req, res);
+    }
+
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    logger.error('Logout error', error);
+    res.status(500).json({ error: 'Failed to logout' });
   }
 });
 
@@ -179,11 +243,11 @@ router.get('/downloads/:productId', authenticate, async (req: AuthenticatedReque
   } catch (error) {
     if (error instanceof Error) {
       if (error.message.includes('No valid license')) {
-        res.status(403).json({ error: error.message });
+        res.status(403).json({ error: 'You do not have a valid license for this product' });
         return;
       }
       if (error.message.includes('not configured') || error.message.includes('not have')) {
-        res.status(404).json({ error: error.message });
+        res.status(404).json({ error: 'Download not available for this product' });
         return;
       }
     }
@@ -221,11 +285,11 @@ router.post('/billing/checkout', authenticate, async (req: AuthenticatedRequest,
     }
     if (error instanceof Error) {
       if (error.message.includes('not found')) {
-        res.status(404).json({ error: error.message });
+        res.status(404).json({ error: 'Product not found' });
         return;
       }
       if (error.message.includes('Stripe price')) {
-        res.status(400).json({ error: error.message });
+        res.status(400).json({ error: 'Product is not available for purchase' });
         return;
       }
     }
@@ -245,7 +309,7 @@ router.post('/billing/portal', authenticate, async (req: AuthenticatedRequest, r
     res.json({ url });
   } catch (error) {
     if (error instanceof Error && error.message.includes('Stripe account')) {
-      res.status(400).json({ error: error.message });
+      res.status(400).json({ error: 'No billing account found. Please make a purchase first.' });
       return;
     }
     console.error('Create billing portal error:', error);
@@ -280,7 +344,7 @@ router.post('/subscriptions/:id/cancel', authenticate, async (req: Authenticated
     res.json({ success: true, message: 'Subscription will be canceled at period end' });
   } catch (error) {
     if (error instanceof Error && error.message.includes('not found')) {
-      res.status(404).json({ error: error.message });
+      res.status(404).json({ error: 'Subscription not found' });
       return;
     }
     console.error('Cancel subscription error:', error);
@@ -300,7 +364,7 @@ router.post('/subscriptions/:id/reactivate', authenticate, async (req: Authentic
     res.json({ success: true, message: 'Subscription reactivated' });
   } catch (error) {
     if (error instanceof Error && error.message.includes('not found')) {
-      res.status(404).json({ error: error.message });
+      res.status(404).json({ error: 'Subscription not found' });
       return;
     }
     console.error('Reactivate subscription error:', error);

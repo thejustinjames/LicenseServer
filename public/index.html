@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>License Server</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -20,6 +21,12 @@
       </div>
       <div id="userNav" class="user-menu hidden">
         <span class="user-email" id="userEmail"></span>
+        <a href="/admin.html" class="admin-link hidden" id="adminLink" title="Admin Dashboard">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </a>
         <button class="btn btn-secondary" id="dashboardBtn">Dashboard</button>
         <button class="btn btn-danger" id="logoutBtn">Logout</button>
       </div>
@@ -37,6 +44,13 @@
 
       <h2 style="margin-bottom: 0.5rem; color: #1e293b;">Available Products</h2>
       <p style="color: #64748b; margin-bottom: 1rem;">Choose a plan that fits your needs</p>
+
+      <div class="products-filter">
+        <input type="text" id="productSearchInput" placeholder="Search products..." class="search-input">
+        <select id="categorySelect" class="category-select">
+          <option value="">All Categories</option>
+        </select>
+      </div>
 
       <div id="productsGrid" class="products-grid">
         <div class="loading">
@@ -113,6 +127,8 @@
         <button class="btn btn-primary" id="billingPortalBtn">Manage Billing</button>
       </div>
 
+      <div id="dashboardAlert"></div>
+
       <div class="stats-grid">
         <div class="stat-card">
           <h4>Active Licenses</h4>
@@ -134,11 +150,12 @@
               <th>Status</th>
               <th>Expires</th>
               <th>Activations</th>
+              <th>Download</th>
             </tr>
           </thead>
           <tbody id="licensesTable">
             <tr>
-              <td colspan="5" class="loading">Loading licenses...</td>
+              <td colspan="6" class="loading">Loading licenses...</td>
             </tr>
           </tbody>
         </table>

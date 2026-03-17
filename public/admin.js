@@ -1,22 +1,46 @@
 var API_URL = '';
-var token = localStorage.getItem('adminToken');
+var token = localStorage.getItem('adminToken'); // Backward compat
 var adminUser = JSON.parse(localStorage.getItem('adminUser') || 'null');
 
 // Data cache
 var products = [];
 var customers = [];
+var categories = [];
+var productSearchTimeout = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
   bindEvents();
 
-  if (token && adminUser) {
-    showAdminInterface();
-    loadDashboard();
-  } else {
-    showSection('login');
-  }
+  // Check auth status from server (validates cookie)
+  checkAuthStatus();
 });
+
+// Check authentication status
+function checkAuthStatus() {
+  api('/api/portal/me')
+    .then(function(data) {
+      if (data.isAdmin) {
+        adminUser = data;
+        localStorage.setItem('adminUser', JSON.stringify(adminUser));
+        showAdminInterface();
+        loadDashboard();
+      } else {
+        showSection('login');
+        showAlert('loginAlert', 'Admin access required', 'error');
+      }
+    })
+    .catch(function() {
+      // Not authenticated
+      if (token && adminUser) {
+        // Try with stored token
+        showAdminInterface();
+        loadDashboard();
+      } else {
+        showSection('login');
+      }
+    });
+}
 
 // Bind Events
 function bindEvents() {
@@ -67,6 +91,44 @@ function bindEvents() {
   document.getElementById('licenseModal').addEventListener('click', function(e) {
     if (e.target === this) closeLicenseModal();
   });
+
+  // Product search and filter
+  document.getElementById('productSearch').addEventListener('input', function() {
+    clearTimeout(productSearchTimeout);
+    productSearchTimeout = setTimeout(function() {
+      loadProducts();
+    }, 300);
+  });
+  document.getElementById('productCategoryFilter').addEventListener('change', function() {
+    loadProducts();
+  });
+
+  // Event delegation for action buttons (prevents inline onclick XSS risk)
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.action-btn');
+    if (!btn) return;
+
+    var action = btn.getAttribute('data-action');
+    var id = btn.getAttribute('data-id');
+
+    switch (action) {
+      case 'edit-product':
+        editProduct(id);
+        break;
+      case 'delete-product':
+        deleteProduct(id);
+        break;
+      case 'suspend-license':
+        suspendLicense(id);
+        break;
+      case 'revoke-license':
+        revokeLicense(id);
+        break;
+      case 'reactivate-license':
+        reactivateLicense(id);
+        break;
+    }
+  });
 }
 
 // API Helper
@@ -76,6 +138,7 @@ function api(endpoint, options) {
     'Content-Type': 'application/json'
   };
 
+  // Include Authorization header as fallback (httpOnly cookie is primary auth)
   if (token) {
     headers['Authorization'] = 'Bearer ' + token;
   }
@@ -83,7 +146,8 @@ function api(endpoint, options) {
   return fetch(API_URL + endpoint, {
     method: options.method || 'GET',
     headers: headers,
-    body: options.body
+    body: options.body,
+    credentials: 'include' // Send cookies with requests
   })
   .then(function(response) {
     return response.json().then(function(data) {
@@ -148,13 +212,20 @@ function handleLogin(e) {
 
 // Logout
 function logout() {
-  token = null;
-  adminUser = null;
-  localStorage.removeItem('adminToken');
-  localStorage.removeItem('adminUser');
-  document.querySelector('.sidebar').style.display = 'none';
-  document.getElementById('adminNav').classList.add('hidden');
-  showSection('login');
+  // Call server logout to invalidate token and clear cookie
+  api('/api/portal/auth/logout', { method: 'POST' })
+    .catch(function() {
+      // Ignore errors, still clear local state
+    })
+    .finally(function() {
+      token = null;
+      adminUser = null;
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('adminUser');
+      document.querySelector('.sidebar').style.display = 'none';
+      document.getElementById('adminNav').classList.add('hidden');
+      showSection('login');
+    });
 }
 
 // Load Section Data
@@ -217,13 +288,22 @@ function loadDashboard() {
 
 // Load Products
 function loadProducts() {
-  api('/api/admin/products')
+  var search = document.getElementById('productSearch').value;
+  var category = document.getElementById('productCategoryFilter').value;
+
+  var url = '/api/admin/products';
+  var params = [];
+  if (search) params.push('search=' + encodeURIComponent(search));
+  if (category) params.push('category=' + encodeURIComponent(category));
+  if (params.length > 0) url += '?' + params.join('&');
+
+  api(url)
     .then(function(data) {
       products = data;
       var tbody = document.getElementById('productsTable');
 
       if (data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #64748b;">No products yet. Click "Add Product" to create one.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b;">No products found.</td></tr>';
         return;
       }
 
@@ -232,6 +312,7 @@ function loadProducts() {
         var prod = data[i];
         html += '<tr>';
         html += '<td><strong>' + escapeHtml(prod.name) + '</strong></td>';
+        html += '<td>' + (prod.category ? '<span class="feature-tag">' + escapeHtml(prod.category) + '</span>' : '-') + '</td>';
         html += '<td>' + escapeHtml(prod.description || '-') + '</td>';
         html += '<td><div class="features-list">';
         var features = prod.features || [];
@@ -244,8 +325,8 @@ function loadProducts() {
         html += '</div></td>';
         html += '<td>' + (prod.stripePriceId ? '<span class="status-badge status-active">Configured</span>' : '<span class="status-badge status-suspended">Not Set</span>') + '</td>';
         html += '<td class="actions">';
-        html += '<button class="btn btn-secondary btn-sm" onclick="editProduct(\'' + prod.id + '\')">Edit</button>';
-        html += '<button class="btn btn-danger btn-sm" onclick="deleteProduct(\'' + prod.id + '\')">Delete</button>';
+        html += '<button class="btn btn-secondary btn-sm action-btn" data-action="edit-product" data-id="' + escapeHtml(prod.id) + '">Edit</button>';
+        html += '<button class="btn btn-danger btn-sm action-btn" data-action="delete-product" data-id="' + escapeHtml(prod.id) + '">Delete</button>';
         html += '</td>';
         html += '</tr>';
       }
@@ -253,6 +334,40 @@ function loadProducts() {
     })
     .catch(function(error) {
       console.error('Failed to load products:', error);
+    });
+
+  // Also load categories for the filter
+  loadCategories();
+}
+
+// Load Categories
+function loadCategories() {
+  api('/api/admin/products/categories')
+    .then(function(data) {
+      categories = data;
+      var select = document.getElementById('productCategoryFilter');
+      var currentValue = select.value;
+
+      // Keep "All Categories" option and add categories
+      select.innerHTML = '<option value="">All Categories</option>';
+      for (var i = 0; i < data.length; i++) {
+        select.innerHTML += '<option value="' + escapeHtml(data[i]) + '">' + escapeHtml(data[i]) + '</option>';
+      }
+
+      // Restore previous selection
+      select.value = currentValue;
+
+      // Update category datalist in modal
+      var datalist = document.getElementById('categoryList');
+      if (datalist) {
+        datalist.innerHTML = '';
+        for (var j = 0; j < data.length; j++) {
+          datalist.innerHTML += '<option value="' + escapeHtml(data[j]) + '">';
+        }
+      }
+    })
+    .catch(function(error) {
+      console.error('Failed to load categories:', error);
     });
 }
 
@@ -278,10 +393,10 @@ function loadLicenses() {
         html += '<td>' + lic.activations.length + ' / ' + lic.maxActivations + '</td>';
         html += '<td class="actions">';
         if (lic.status === 'ACTIVE') {
-          html += '<button class="btn btn-secondary btn-sm" onclick="suspendLicense(\'' + lic.id + '\')">Suspend</button>';
-          html += '<button class="btn btn-danger btn-sm" onclick="revokeLicense(\'' + lic.id + '\')">Revoke</button>';
+          html += '<button class="btn btn-secondary btn-sm action-btn" data-action="suspend-license" data-id="' + escapeHtml(lic.id) + '">Suspend</button>';
+          html += '<button class="btn btn-danger btn-sm action-btn" data-action="revoke-license" data-id="' + escapeHtml(lic.id) + '">Revoke</button>';
         } else if (lic.status === 'SUSPENDED') {
-          html += '<button class="btn btn-success btn-sm" onclick="reactivateLicense(\'' + lic.id + '\')">Reactivate</button>';
+          html += '<button class="btn btn-success btn-sm action-btn" data-action="reactivate-license" data-id="' + escapeHtml(lic.id) + '">Reactivate</button>';
         }
         html += '</td>';
         html += '</tr>';
@@ -388,15 +503,21 @@ function openProductModal(product) {
   document.getElementById('productForm').reset();
   document.getElementById('stripeFields').classList.add('hidden');
 
+  // Load categories for autocomplete
+  loadCategories();
+
   if (product) {
     document.getElementById('productModalTitle').textContent = 'Edit Product';
     document.getElementById('productId').value = product.id;
     document.getElementById('productName').value = product.name;
     document.getElementById('productDescription').value = product.description || '';
+    document.getElementById('productCategory').value = product.category || '';
     document.getElementById('productFeatures').value = (product.features || []).join(', ');
     document.getElementById('licenseDuration').value = product.licenseDurationDays || '';
     document.getElementById('validationMode').value = product.validationMode || 'ONLINE';
     document.getElementById('pricingType').value = product.pricingType || 'FIXED';
+    document.getElementById('s3PackageKey').value = product.s3PackageKey || '';
+    document.getElementById('productVersion').value = product.version || '';
   } else {
     document.getElementById('productModalTitle').textContent = 'Add Product';
     document.getElementById('productId').value = '';
@@ -438,10 +559,13 @@ function handleProductSubmit(e) {
   var data = {
     name: document.getElementById('productName').value,
     description: document.getElementById('productDescription').value || undefined,
+    category: document.getElementById('productCategory').value || undefined,
     features: features,
     licenseDurationDays: document.getElementById('licenseDuration').value ? parseInt(document.getElementById('licenseDuration').value) : undefined,
     validationMode: document.getElementById('validationMode').value,
-    pricingType: document.getElementById('pricingType').value
+    pricingType: document.getElementById('pricingType').value,
+    s3PackageKey: document.getElementById('s3PackageKey').value || undefined,
+    version: document.getElementById('productVersion').value || undefined
   };
 
   if (document.getElementById('createStripeProduct').checked && !id) {

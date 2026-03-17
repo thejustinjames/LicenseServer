@@ -26,12 +26,15 @@ const envSchema = z.object({
   STRIPE_TRIAL_PERIOD_DAYS: z.string().optional(),
   STRIPE_TRIAL_END_REMINDER_DAYS: z.string().default('3'),
 
-  // AWS Configuration
+  // AWS / S3 Configuration
   AWS_REGION: z.string().default('us-east-1'),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   AWS_ROLE_ARN: z.string().optional(),
   S3_BUCKET_NAME: z.string().optional(),
+  S3_ENDPOINT: z.string().optional(), // For MinIO: http://minio:9000
+  S3_FORCE_PATH_STYLE: z.string().default('false'), // Required for MinIO
+  S3_DOWNLOAD_EXPIRY_HOURS: z.string().default('4'), // Download link expiry
 
   // Config Provider
   CONFIG_PROVIDER: z.enum(['env', 'secrets-manager', 'kubernetes']).default('env'),

@@ -35,6 +35,7 @@ model Product {
   id                   String         @id @default(uuid())
   name                 String
   description          String?
+  category             String?
   stripeProductId      String?        @unique @map("stripe_product_id")
   stripePriceId        String?        @map("stripe_price_id")
   validationMode       ValidationMode @default(ONLINE) @map("validation_mode")
@@ -48,6 +49,7 @@ model Product {
 
   licenses License[]
 
+  @@index([category])
   @@map("products")
 }
 

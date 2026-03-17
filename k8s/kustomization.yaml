@@ -1,0 +1,23 @@
+# Kustomization for License Server Kubernetes deployment
+#
+# Usage:
+#   Production: kubectl apply -k k8s/
+#   Development: kubectl apply -k k8s/overlays/dev/
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: license-server
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml
+  - secret.yaml
+  - serviceaccount.yaml
+  - hpa.yaml
+
+commonLabels:
+  app: license-server
+  managed-by: kustomize

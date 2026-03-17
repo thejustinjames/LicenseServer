@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Dashboard - License Server</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/admin.css">
 </head>
 <body>
@@ -141,11 +142,23 @@
           <button class="btn btn-primary" id="addProductBtn">+ Add Product</button>
         </div>
 
+        <div class="filter-bar">
+          <div class="search-box">
+            <input type="text" id="productSearch" placeholder="Search products...">
+          </div>
+          <div class="category-filter">
+            <select id="productCategoryFilter">
+              <option value="">All Categories</option>
+            </select>
+          </div>
+        </div>
+
         <div class="table-container">
           <table>
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Category</th>
                 <th>Description</th>
                 <th>Features</th>
                 <th>Stripe Price</th>
@@ -153,7 +166,7 @@
               </tr>
             </thead>
             <tbody id="productsTable">
-              <tr><td colspan="5" class="loading">Loading...</td></tr>
+              <tr><td colspan="6" class="loading">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -272,6 +285,13 @@
         </div>
 
         <div class="form-group">
+          <label for="productCategory">Category</label>
+          <input type="text" id="productCategory" list="categoryList" placeholder="e.g., Developer Tools, Enterprise, Starter">
+          <datalist id="categoryList"></datalist>
+          <small>Helps users find products by type</small>
+        </div>
+
+        <div class="form-group">
           <label for="productFeatures">Features (comma-separated)</label>
           <input type="text" id="productFeatures" placeholder="e.g., unlimited-projects, priority-support, api-access">
           <small>These will be available for feature checking in your app</small>
@@ -335,6 +355,20 @@
               <option value="year">Yearly</option>
             </select>
           </div>
+        </div>
+
+        <hr>
+        <h3>Download Package (S3/MinIO)</h3>
+
+        <div class="form-group">
+          <label for="s3PackageKey">S3 File Path</label>
+          <input type="text" id="s3PackageKey" placeholder="e.g., downloads/myapp-v1.0.0.zip">
+          <small>Path to the downloadable file in S3. After purchase, users can download for 4 hours.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="productVersion">Version</label>
+          <input type="text" id="productVersion" placeholder="e.g., 1.0.0">
         </div>
 
         <div class="modal-footer">

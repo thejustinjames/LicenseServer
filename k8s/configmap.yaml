@@ -42,8 +42,15 @@ data:
   STRIPE_SUCCESS_URL: "https://your-domain.com/success"
   STRIPE_CANCEL_URL: "https://your-domain.com/cancel"
 
-  # S3 Configuration
+  # S3 Configuration (for production, use AWS S3)
   # S3_BUCKET_NAME: "your-license-server-bucket"
+  # S3_DOWNLOAD_EXPIRY_HOURS: "4"
+
+  # MinIO Configuration (for local/dev, uncomment below and comment AWS S3 above)
+  # S3_BUCKET_NAME: "license-server-downloads"
+  # S3_ENDPOINT: "http://minio:9000"
+  # S3_FORCE_PATH_STYLE: "true"
+  # S3_DOWNLOAD_EXPIRY_HOURS: "4"
 
   # Logging
   LOG_LEVEL: "info"

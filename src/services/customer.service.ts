@@ -137,12 +137,13 @@ export async function authenticateCustomer(email: string, password: string): Pro
     where: { email },
   });
 
-  if (!customer) {
-    return null;
-  }
+  // Constant-time comparison to prevent timing attacks
+  // Always perform bcrypt comparison even for non-existent users
+  const dummyHash = '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.SQyf6Vn6Qq.Sjy';
+  const hashToCompare = customer?.passwordHash || dummyHash;
+  const isValid = await bcrypt.compare(password, hashToCompare);
 
-  const isValid = await bcrypt.compare(password, customer.passwordHash);
-  if (!isValid) {
+  if (!customer || !isValid) {
     return null;
   }
 

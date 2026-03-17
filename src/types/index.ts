@@ -9,6 +9,15 @@ export interface AuthenticatedRequest extends Request {
     cognitoSub?: string;
     groups?: string[];
   };
+  token?: string;
+  tokenPayload?: {
+    id: string;
+    email: string;
+    isAdmin: boolean;
+    jti?: string;
+    iat?: number;
+    exp?: number;
+  };
 }
 
 export interface LicenseValidationRequest {

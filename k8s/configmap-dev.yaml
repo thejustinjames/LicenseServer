@@ -1,0 +1,45 @@
+# Development ConfigMap with MinIO settings
+# Use this for local development and testing
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: license-server-config
+  labels:
+    app: license-server
+    environment: development
+data:
+  # Server Configuration
+  PORT: "3000"
+  NODE_ENV: "development"
+
+  # Config Provider
+  CONFIG_PROVIDER: "kubernetes"
+  K8S_NAMESPACE: "default"
+
+  # AWS Region (still needed for SDK initialization)
+  AWS_REGION: "us-east-1"
+
+  # Authentication Provider
+  AUTH_PROVIDER: "jwt"
+  JWT_EXPIRES_IN: "7d"
+
+  # CORS Configuration (permissive for dev)
+  CORS_ENABLED: "true"
+  CORS_ORIGINS: "*"
+  CORS_METHODS: "GET,POST,PUT,DELETE,OPTIONS"
+  CORS_ALLOWED_HEADERS: "Content-Type,Authorization,X-License-Key"
+  CORS_CREDENTIALS: "true"
+  CORS_MAX_AGE: "86400"
+
+  # Stripe URLs
+  STRIPE_SUCCESS_URL: "http://localhost:3000/success"
+  STRIPE_CANCEL_URL: "http://localhost:3000/cancel"
+
+  # MinIO S3-compatible storage
+  S3_BUCKET_NAME: "license-server-downloads"
+  S3_ENDPOINT: "http://minio:9000"
+  S3_FORCE_PATH_STYLE: "true"
+  S3_DOWNLOAD_EXPIRY_HOURS: "4"
+
+  # Logging
+  LOG_LEVEL: "debug"

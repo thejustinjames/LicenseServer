@@ -2,19 +2,33 @@
  * JWT Authentication Provider
  *
  * Local JWT-based authentication using jsonwebtoken library.
- * This is the default authentication method.
+ * Supports both httpOnly cookies and Authorization header.
  */
 
 import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config/index.js';
+import { isTokenBlacklisted, blacklistToken } from '../config/redis.js';
+import { logger } from '../services/logger.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 import type { AuthProviderInterface, AuthUser } from './index.js';
+
+// Cookie configuration
+export const AUTH_COOKIE_NAME = 'auth_token';
+export const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const,
+  path: '/',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+};
 
 interface JwtPayload {
   id: string;
   email: string;
   isAdmin: boolean;
+  jti?: string; // JWT ID for blacklisting
   iat?: number;
   exp?: number;
 }
@@ -22,32 +36,49 @@ interface JwtPayload {
 export class JWTAuthProvider implements AuthProviderInterface {
   private initialized = false;
 
+  /**
+   * Extract token from request (cookie first, then header)
+   */
+  private extractToken(req: AuthenticatedRequest): string | null {
+    // First try cookie
+    const cookieToken = req.cookies?.[AUTH_COOKIE_NAME];
+    if (cookieToken) {
+      return cookieToken;
+    }
+
+    // Fall back to Authorization header
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      const [bearer, token] = authHeader.split(' ');
+      if (bearer === 'Bearer' && token) {
+        return token;
+      }
+    }
+
+    return null;
+  }
+
   async authenticate(
     req: AuthenticatedRequest,
     res: Response,
     next: NextFunction
   ): Promise<void> {
-    const authHeader = req.headers.authorization;
+    const token = this.extractToken(req);
 
-    if (!authHeader) {
-      res.status(401).json({ error: 'Authorization header required' });
+    if (!token) {
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
 
-    const [bearer, token] = authHeader.split(' ');
-
-    if (bearer !== 'Bearer' || !token) {
-      res.status(401).json({ error: 'Invalid authorization format' });
+    const result = await this.verifyTokenWithBlacklist(token);
+    if (!result.user) {
+      res.status(401).json({ error: result.error || 'Invalid or expired token' });
       return;
     }
 
-    const user = await this.verifyToken(token);
-    if (!user) {
-      res.status(401).json({ error: 'Invalid or expired token' });
-      return;
-    }
-
-    req.user = user;
+    req.user = result.user;
+    req.token = token;
+    req.tokenPayload = result.payload;
     next();
   }
 
@@ -56,39 +87,64 @@ export class JWTAuthProvider implements AuthProviderInterface {
     res: Response,
     next: NextFunction
   ): Promise<void> {
-    const authHeader = req.headers.authorization;
+    const token = this.extractToken(req);
 
-    if (!authHeader) {
+    if (!token) {
       next();
       return;
     }
 
-    const [bearer, token] = authHeader.split(' ');
-
-    if (bearer !== 'Bearer' || !token) {
-      next();
-      return;
-    }
-
-    const user = await this.verifyToken(token);
-    if (user) {
-      req.user = user;
+    const result = await this.verifyTokenWithBlacklist(token);
+    if (result.user) {
+      req.user = result.user;
+      req.token = token;
+      req.tokenPayload = result.payload;
     }
 
     next();
   }
 
-  async verifyToken(token: string): Promise<AuthUser | null> {
+  /**
+   * Verify token and check blacklist
+   */
+  private async verifyTokenWithBlacklist(
+    token: string
+  ): Promise<{ user: AuthUser | null; payload?: JwtPayload; error?: string }> {
     try {
       const decoded = jwt.verify(token, config.JWT_SECRET) as JwtPayload;
+
+      // Check if token is blacklisted
+      const jti = decoded.jti || token.slice(-32); // Use last 32 chars as ID if no jti
+      const isBlacklisted = await isTokenBlacklisted(jti);
+
+      if (isBlacklisted) {
+        logger.debug('Token is blacklisted', { jti });
+        return { user: null, error: 'Token has been revoked' };
+      }
+
       return {
-        id: decoded.id,
-        email: decoded.email,
-        isAdmin: decoded.isAdmin,
+        user: {
+          id: decoded.id,
+          email: decoded.email,
+          isAdmin: decoded.isAdmin,
+        },
+        payload: decoded,
       };
     } catch (error) {
-      return null;
+      if (error instanceof jwt.TokenExpiredError) {
+        return { user: null, error: 'Token has expired' };
+      }
+      if (error instanceof jwt.JsonWebTokenError) {
+        return { user: null, error: 'Invalid token' };
+      }
+      logger.error('Token verification error', error);
+      return { user: null, error: 'Token verification failed' };
     }
+  }
+
+  async verifyToken(token: string): Promise<AuthUser | null> {
+    const result = await this.verifyTokenWithBlacklist(token);
+    return result.user;
   }
 
   async initialize(): Promise<void> {
@@ -101,18 +157,93 @@ export class JWTAuthProvider implements AuthProviderInterface {
       throw new Error('JWT_SECRET must be at least 32 characters');
     }
 
-    console.log('JWT auth provider initialized');
+    logger.info('JWT auth provider initialized');
     this.initialized = true;
   }
 
   /**
    * Generate a JWT token for a user
    */
-  generateToken(user: { id: string; email: string; isAdmin: boolean }): string {
-    return jwt.sign(
-      { id: user.id, email: user.email, isAdmin: user.isAdmin },
+  generateToken(user: { id: string; email: string; isAdmin: boolean }): {
+    token: string;
+    jti: string;
+    expiresAt: number;
+  } {
+    const jti = uuidv4();
+    const expiresIn = config.JWT_EXPIRES_IN || '7d';
+
+    // Calculate expiration timestamp
+    let expiresAt: number;
+    if (typeof expiresIn === 'string') {
+      const match = expiresIn.match(/^(\d+)([smhd])$/);
+      if (match) {
+        const value = parseInt(match[1], 10);
+        const unit = match[2];
+        const multipliers: Record<string, number> = {
+          s: 1000,
+          m: 60 * 1000,
+          h: 60 * 60 * 1000,
+          d: 24 * 60 * 60 * 1000,
+        };
+        expiresAt = Date.now() + value * (multipliers[unit] || 1000);
+      } else {
+        expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000; // Default 7 days
+      }
+    } else {
+      expiresAt = Date.now() + expiresIn * 1000;
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, isAdmin: user.isAdmin, jti },
       config.JWT_SECRET,
-      { expiresIn: config.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
+      { expiresIn: expiresIn as jwt.SignOptions['expiresIn'] }
     );
+
+    return { token, jti, expiresAt };
+  }
+
+  /**
+   * Set auth cookie on response
+   */
+  setAuthCookie(res: Response, token: string): void {
+    res.cookie(AUTH_COOKIE_NAME, token, COOKIE_OPTIONS);
+  }
+
+  /**
+   * Clear auth cookie
+   */
+  clearAuthCookie(res: Response): void {
+    res.clearCookie(AUTH_COOKIE_NAME, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+    });
+  }
+
+  /**
+   * Logout: blacklist token and clear cookie
+   */
+  async logout(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const token = this.extractToken(req);
+
+    if (token) {
+      try {
+        const decoded = jwt.decode(token) as JwtPayload | null;
+        if (decoded?.exp) {
+          const jti = decoded.jti || token.slice(-32);
+          const expiresAt = decoded.exp * 1000; // Convert to milliseconds
+          await blacklistToken(jti, expiresAt);
+          logger.audit('logout', {
+            userId: decoded.id,
+            success: true,
+          });
+        }
+      } catch (error) {
+        logger.error('Error blacklisting token during logout', error);
+      }
+    }
+
+    this.clearAuthCookie(res);
   }
 }

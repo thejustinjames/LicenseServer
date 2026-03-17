@@ -115,12 +115,25 @@ export function getAWSRegion(): string {
 
 /**
  * Create an S3 client with automatic credential resolution
+ * Supports MinIO and other S3-compatible storage via S3_ENDPOINT
  */
 export function createS3Client(): S3Client {
-  return new S3Client({
+  const endpoint = process.env.S3_ENDPOINT;
+  const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+
+  const config: ConstructorParameters<typeof S3Client>[0] = {
     region: getAWSRegion(),
     credentials: getAWSCredentials(),
-  });
+  };
+
+  // For MinIO or other S3-compatible storage
+  if (endpoint) {
+    console.debug(`Using custom S3 endpoint: ${endpoint}`);
+    config.endpoint = endpoint;
+    config.forcePathStyle = forcePathStyle;
+  }
+
+  return new S3Client(config);
 }
 
 /**

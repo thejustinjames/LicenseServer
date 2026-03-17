@@ -1,0 +1,41 @@
+# Development overlay for License Server
+#
+# Includes MinIO and PostgreSQL for local testing
+#
+# Usage: kubectl apply -k k8s/overlays/dev/
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: license-server-dev
+
+resources:
+  - ../../deployment.yaml
+  - ../../service.yaml
+  - ../../serviceaccount.yaml
+  - ../../postgres.yaml
+  - ../../minio.yaml
+
+# Override with dev-specific configs
+configMapGenerator:
+  - name: license-server-config
+    behavior: replace
+    files:
+      - config=configmap-dev.env
+
+secretGenerator:
+  - name: license-server-secrets
+    behavior: replace
+    files:
+      - secrets=secrets-dev.env
+
+commonLabels:
+  app: license-server
+  environment: development
+  managed-by: kustomize
+
+# Reduce replicas for dev
+replicas:
+  - name: license-server
+    count: 1

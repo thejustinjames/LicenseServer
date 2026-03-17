@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 export interface CreateProductInput {
   name: string;
   description?: string;
+  category?: string;
   validationMode?: ValidationMode;
   pricingType?: PricingType;
   licenseDurationDays?: number;
@@ -24,9 +25,15 @@ export interface CreateProductInput {
   taxBehavior?: 'exclusive' | 'inclusive' | 'unspecified';
 }
 
+export interface ProductSearchOptions {
+  search?: string;
+  category?: string;
+}
+
 export interface UpdateProductInput {
   name?: string;
   description?: string;
+  category?: string | null;
   validationMode?: ValidationMode;
   pricingType?: PricingType;
   licenseDurationDays?: number | null;
@@ -110,6 +117,7 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
     data: {
       name: input.name,
       description: input.description,
+      category: input.category,
       validationMode: input.validationMode || 'ONLINE',
       pricingType: input.pricingType || 'FIXED',
       licenseDurationDays: input.licenseDurationDays,
@@ -134,10 +142,36 @@ export async function getProductByStripeProductId(stripeProductId: string): Prom
   });
 }
 
-export async function listProducts(): Promise<Product[]> {
+export async function listProducts(options?: ProductSearchOptions): Promise<Product[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const where: any = {};
+
+  if (options?.category) {
+    where.category = options.category;
+  }
+
+  if (options?.search) {
+    where.OR = [
+      { name: { contains: options.search, mode: 'insensitive' } },
+      { description: { contains: options.search, mode: 'insensitive' } },
+    ];
+  }
+
   return prisma.product.findMany({
+    where,
     orderBy: { createdAt: 'desc' },
   });
+}
+
+export async function listCategories(): Promise<string[]> {
+  const products = await prisma.product.findMany({
+    where: { category: { not: null } },
+    select: { category: true },
+    distinct: ['category'],
+    orderBy: { category: 'asc' },
+  });
+
+  return products.map(p => p.category).filter((c): c is string => c !== null);
 }
 
 export async function updateProduct(id: string, input: UpdateProductInput): Promise<Product> {

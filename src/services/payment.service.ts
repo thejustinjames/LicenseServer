@@ -405,7 +405,7 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
 
   // If fully refunded, revoke all active licenses for this customer
   if (isFullRefund) {
-    console.log(`Full refund processed for customer ${customer.email}, revoking licenses`);
+    console.log(`Full refund processed for customer ${customer.id}, revoking licenses`);
 
     await prisma.license.updateMany({
       where: {
@@ -415,7 +415,7 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
       data: { status: 'REVOKED' },
     });
   } else {
-    console.log(`Partial refund of ${refundAmount} cents processed for customer ${customer.email}`);
+    console.log(`Partial refund of ${refundAmount} cents processed for customer ${customer.id}`);
   }
 
   // Send refund notification email
@@ -453,7 +453,7 @@ export async function handleTrialWillEnd(subscription: Stripe.Subscription): Pro
   const trialEndDate = new Date(trialEnd * 1000);
   const daysRemaining = Math.ceil((trialEndDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 
-  console.log(`Trial ending for customer ${customer.email} in ${daysRemaining} days`);
+  console.log(`Trial ending for customer ${customer.id} in ${daysRemaining} days`);
 
   // Update subscription with trial end info
   await prisma.subscription.update({

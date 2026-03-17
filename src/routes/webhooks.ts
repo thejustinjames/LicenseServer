@@ -2,12 +2,29 @@ import { Router, Request, Response } from 'express';
 import { stripe } from '../config/stripe.js';
 import { config } from '../config/index.js';
 import * as paymentService from '../services/payment.service.js';
+import { webhookRateLimit } from '../middleware/rateLimit.js';
+import { logger } from '../services/logger.service.js';
 import Stripe from 'stripe';
 
 const router = Router();
 
+// Track processed webhook events to prevent duplicates (in-memory, use Redis in production)
+const processedEvents = new Map<string, number>();
+const EVENT_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+// Cleanup old processed events every hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [eventId, timestamp] of processedEvents.entries()) {
+    if (now - timestamp > EVENT_TTL) {
+      processedEvents.delete(eventId);
+    }
+  }
+}, 60 * 60 * 1000);
+
 router.post(
   '/stripe',
+  webhookRateLimit,
   async (req: Request, res: Response) => {
     const sig = req.headers['stripe-signature'];
 
@@ -25,12 +42,19 @@ router.post(
         config.STRIPE_WEBHOOK_SECRET
       );
     } catch (error) {
-      console.error('Webhook signature verification failed:', error);
+      logger.error('Webhook signature verification failed', error);
       res.status(400).json({ error: 'Webhook signature verification failed' });
       return;
     }
 
-    console.log(`Received Stripe webhook: ${event.type}`);
+    logger.info('Received Stripe webhook', { eventType: event.type, eventId: event.id });
+
+    // Idempotency check - skip already processed events
+    if (processedEvents.has(event.id)) {
+      logger.debug('Webhook event already processed, skipping', { eventId: event.id });
+      res.json({ received: true, duplicate: true });
+      return;
+    }
 
     try {
       switch (event.type) {
@@ -47,9 +71,8 @@ router.post(
         // SUBSCRIPTION EVENTS
         // =====================================================================
         case 'customer.subscription.created': {
-          // Handle subscription creation (useful for logging/analytics)
           const subscription = event.data.object as Stripe.Subscription;
-          console.log(`New subscription created: ${subscription.id}`);
+          logger.info('New subscription created', { subscriptionId: subscription.id });
           await paymentService.handleSubscriptionUpdated(subscription);
           break;
         }
@@ -67,24 +90,21 @@ router.post(
         }
 
         case 'customer.subscription.trial_will_end': {
-          // Trial ending soon (default: 3 days before)
           const subscription = event.data.object as Stripe.Subscription;
           await paymentService.handleTrialWillEnd(subscription);
           break;
         }
 
         case 'customer.subscription.paused': {
-          // Subscription paused (for payment collection pause feature)
           const subscription = event.data.object as Stripe.Subscription;
-          console.log(`Subscription paused: ${subscription.id}`);
+          logger.info('Subscription paused', { subscriptionId: subscription.id });
           await paymentService.handleSubscriptionUpdated(subscription);
           break;
         }
 
         case 'customer.subscription.resumed': {
-          // Subscription resumed after pause
           const subscription = event.data.object as Stripe.Subscription;
-          console.log(`Subscription resumed: ${subscription.id}`);
+          logger.info('Subscription resumed', { subscriptionId: subscription.id });
           await paymentService.handleSubscriptionUpdated(subscription);
           break;
         }
@@ -93,10 +113,8 @@ router.post(
         // INVOICE EVENTS
         // =====================================================================
         case 'invoice.payment_succeeded': {
-          // Payment successful - can be used for notifications
           const invoice = event.data.object as Stripe.Invoice;
-          console.log(`Invoice payment succeeded: ${invoice.id}`);
-          // Subscription will be updated via customer.subscription.updated
+          logger.info('Invoice payment succeeded', { invoiceId: invoice.id });
           break;
         }
 
@@ -107,9 +125,8 @@ router.post(
         }
 
         case 'invoice.upcoming': {
-          // Invoice will be created soon (useful for notifications)
           const invoice = event.data.object as Stripe.Invoice;
-          console.log(`Upcoming invoice for subscription: ${invoice.subscription}`);
+          logger.info('Upcoming invoice', { subscriptionId: invoice.subscription });
           break;
         }
 
@@ -123,17 +140,14 @@ router.post(
         }
 
         case 'charge.dispute.created': {
-          // Chargeback/dispute initiated
           const dispute = event.data.object as Stripe.Dispute;
-          console.warn(`Dispute created for charge: ${dispute.charge}`);
-          // You may want to suspend the license until dispute is resolved
+          logger.warn('Dispute created', { chargeId: dispute.charge, disputeId: dispute.id });
           break;
         }
 
         case 'charge.dispute.closed': {
-          // Dispute resolved
           const dispute = event.data.object as Stripe.Dispute;
-          console.log(`Dispute closed for charge: ${dispute.charge}, status: ${dispute.status}`);
+          logger.info('Dispute closed', { chargeId: dispute.charge, status: dispute.status });
           break;
         }
 
@@ -142,19 +156,19 @@ router.post(
         // =====================================================================
         case 'customer.created': {
           const customer = event.data.object as Stripe.Customer;
-          console.log(`Customer created in Stripe: ${customer.id}`);
+          logger.debug('Customer created in Stripe', { stripeCustomerId: customer.id });
           break;
         }
 
         case 'customer.updated': {
           const customer = event.data.object as Stripe.Customer;
-          console.log(`Customer updated in Stripe: ${customer.id}`);
+          logger.debug('Customer updated in Stripe', { stripeCustomerId: customer.id });
           break;
         }
 
         case 'customer.deleted': {
           const customer = event.data.object as Stripe.Customer;
-          console.log(`Customer deleted in Stripe: ${customer.id}`);
+          logger.debug('Customer deleted in Stripe', { stripeCustomerId: customer.id });
           break;
         }
 
@@ -163,13 +177,13 @@ router.post(
         // =====================================================================
         case 'payment_method.attached': {
           const paymentMethod = event.data.object as Stripe.PaymentMethod;
-          console.log(`Payment method attached to customer: ${paymentMethod.customer}`);
+          logger.debug('Payment method attached', { customerId: paymentMethod.customer });
           break;
         }
 
         case 'payment_method.detached': {
           const paymentMethod = event.data.object as Stripe.PaymentMethod;
-          console.log(`Payment method detached: ${paymentMethod.id}`);
+          logger.debug('Payment method detached', { paymentMethodId: paymentMethod.id });
           break;
         }
 
@@ -177,7 +191,7 @@ router.post(
         // TAX EVENTS (when using Stripe Tax)
         // =====================================================================
         case 'tax.settings.updated': {
-          console.log('Tax settings updated');
+          logger.info('Tax settings updated');
           break;
         }
 
@@ -185,12 +199,14 @@ router.post(
         // DEFAULT
         // =====================================================================
         default:
-          console.log(`Unhandled event type: ${event.type}`);
+          logger.debug('Unhandled event type', { eventType: event.type });
       }
 
+      // Mark event as processed to prevent duplicate handling
+      processedEvents.set(event.id, Date.now());
       res.json({ received: true });
     } catch (error) {
-      console.error(`Error handling webhook ${event.type}:`, error);
+      logger.error('Error handling webhook', error, { eventType: event.type });
       res.status(500).json({ error: 'Webhook handler failed' });
     }
   }

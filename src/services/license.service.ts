@@ -272,7 +272,7 @@ export async function getLicensesByCustomerId(customerId: string): Promise<Licen
     where: { customerId },
     include: {
       customer: { select: { id: true, email: true, name: true } },
-      product: { select: { id: true, name: true, features: true } },
+      product: { select: { id: true, name: true, features: true, s3PackageKey: true, version: true } },
       activations: true,
     },
     orderBy: { createdAt: 'desc' },

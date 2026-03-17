@@ -12,6 +12,7 @@
 - [x] License key checksum validation
 - [x] License service (create, validate, activate, deactivate, revoke, suspend)
 - [x] Product service (CRUD with Stripe integration)
+- [x] Product categories with search and filtering
 - [x] Customer service (CRUD, authentication, password hashing)
 - [x] Multi-device activation support with machine fingerprinting
 
@@ -57,9 +58,11 @@
 
 ## Phase 5: S3 Integration
 - [x] AWS SDK setup with credential provider chain
-- [x] Signed URL generation for downloads
+- [x] Signed URL generation for downloads (configurable expiry, default 4 hours)
 - [x] IAM role support (no hardcoded credentials)
 - [x] S3 bucket health check in readiness probe
+- [x] MinIO support for local development
+- [x] S3-compatible endpoint configuration
 
 ## Phase 6: Customer Portal Frontend
 - [x] Simple HTML/CSS/JS SPA (no framework)
@@ -68,13 +71,18 @@
 - [x] License dashboard with stats
 - [x] Subscription management (cancel/reactivate)
 - [x] Products listing with checkout buttons
+- [x] Product search and category filtering
 - [x] Stripe checkout redirect handling
 - [x] Success page with professional icon
 - [x] CSP-compliant (no inline scripts)
 - [x] Responsive design
+- [x] Favicon (SVG with gradient logo)
+- [x] Admin icon link for admin users
+- [x] In-app error messages (no browser alerts)
 - [x] Admin Dashboard (`/admin.html`)
   - Dashboard with stats overview
   - Products management (CRUD with Stripe integration)
+  - Product categories with search/filter
   - Licenses management (create, suspend, revoke, reactivate)
   - Customers listing
   - Subscriptions listing
@@ -110,10 +118,13 @@
 - [x] Kubernetes manifests:
   - Deployment with health probes
   - Service
-  - ConfigMap
+  - ConfigMap (production + dev overlays)
   - Secret (template)
   - ServiceAccount for IRSA
   - HorizontalPodAutoscaler
+  - PostgreSQL deployment for dev
+  - MinIO S3-compatible storage for dev
+  - Kustomize overlays for environments
 - [x] Enhanced health checks (liveness + readiness with DB check)
 
 ## Phase 10: Email Notifications (Microsoft Graph / Office 365)
@@ -156,6 +167,14 @@
 
 | Date | Task | Phase |
 |------|------|-------|
+| 2026-03-17 | Kubernetes MinIO + PostgreSQL deployments | Phase 9 |
+| 2026-03-17 | S3/MinIO download integration with configurable expiry | Phase 5, 6 |
+| 2026-03-17 | Product download configuration in admin panel | Phase 6 |
+| 2026-03-17 | Customer download button after purchase | Phase 6 |
+| 2026-03-17 | Product categories with search/filter | Phase 2, 6 |
+| 2026-03-17 | Favicon support (SVG) | Phase 6 |
+| 2026-03-17 | Admin icon link for admin users | Phase 6 |
+| 2026-03-17 | In-app error messages | Phase 6 |
 | 2026-03-17 | Admin Dashboard UI | Phase 6 |
 | 2026-03-17 | Production deployment documentation | Phase 8 |
 | 2026-03-17 | Unit tests with Vitest (25 tests) | Phase 8 |

@@ -5,4 +5,4 @@
  * This maintains backward compatibility while enabling multiple auth providers.
  */
 
-export { authenticate, optionalAuth } from '../auth/index.js';
+export { authenticate, optionalAuth, getAuthProvider } from '../auth/index.js';

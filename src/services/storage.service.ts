@@ -1,15 +1,17 @@
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { s3Client } from '../config/s3.js';
 import { config } from '../config/index.js';
 import * as productService from './product.service.js';
 import * as licenseService from './license.service.js';
 
-const DEFAULT_EXPIRATION = 3600; // 1 hour
+// Download link expiry in seconds (default 4 hours)
+const DOWNLOAD_EXPIRY_SECONDS = parseInt(config.S3_DOWNLOAD_EXPIRY_HOURS || '4', 10) * 3600;
 
 export interface SignedDownloadUrl {
   url: string;
   expiresAt: Date;
+  expiresInHours: number;
   filename: string;
 }
 
@@ -48,17 +50,18 @@ export async function getSignedDownloadUrl(
   });
 
   const url = await getSignedUrl(s3Client, command, {
-    expiresIn: DEFAULT_EXPIRATION,
+    expiresIn: DOWNLOAD_EXPIRY_SECONDS,
   });
 
   const expiresAt = new Date();
-  expiresAt.setSeconds(expiresAt.getSeconds() + DEFAULT_EXPIRATION);
+  expiresAt.setSeconds(expiresAt.getSeconds() + DOWNLOAD_EXPIRY_SECONDS);
 
   const filename = product.s3PackageKey.split('/').pop() || 'download';
 
   return {
     url,
     expiresAt,
+    expiresInHours: getDownloadExpiryHours(),
     filename,
   };
 }
@@ -99,17 +102,85 @@ export async function getSignedDownloadUrlByLicenseKey(
   });
 
   const url = await getSignedUrl(s3Client, command, {
-    expiresIn: DEFAULT_EXPIRATION,
+    expiresIn: DOWNLOAD_EXPIRY_SECONDS,
   });
 
   const expiresAt = new Date();
-  expiresAt.setSeconds(expiresAt.getSeconds() + DEFAULT_EXPIRATION);
+  expiresAt.setSeconds(expiresAt.getSeconds() + DOWNLOAD_EXPIRY_SECONDS);
 
   const filename = product.s3PackageKey.split('/').pop() || 'download';
 
   return {
     url,
     expiresAt,
+    expiresInHours: getDownloadExpiryHours(),
     filename,
   };
+}
+
+/**
+ * Get download expiry hours for display to users
+ */
+export function getDownloadExpiryHours(): number {
+  return parseInt(config.S3_DOWNLOAD_EXPIRY_HOURS || '4', 10);
+}
+
+/**
+ * Check if an S3 object exists
+ */
+export async function checkFileExists(key: string): Promise<boolean> {
+  if (!config.S3_BUCKET_NAME) {
+    return false;
+  }
+
+  try {
+    const command = new HeadObjectCommand({
+      Bucket: config.S3_BUCKET_NAME,
+      Key: key,
+    });
+    await s3Client.send(command);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get file info from S3
+ */
+export interface S3FileInfo {
+  key: string;
+  size: number;
+  lastModified: Date;
+  contentType?: string;
+}
+
+export async function getFileInfo(key: string): Promise<S3FileInfo | null> {
+  if (!config.S3_BUCKET_NAME) {
+    return null;
+  }
+
+  try {
+    const command = new HeadObjectCommand({
+      Bucket: config.S3_BUCKET_NAME,
+      Key: key,
+    });
+    const response = await s3Client.send(command);
+
+    return {
+      key,
+      size: response.ContentLength || 0,
+      lastModified: response.LastModified || new Date(),
+      contentType: response.ContentType,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if S3 is configured and accessible
+ */
+export function isS3Configured(): boolean {
+  return !!config.S3_BUCKET_NAME;
 }

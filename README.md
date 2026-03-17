@@ -8,9 +8,13 @@ A Lemon Squeezy-style license server with Stripe payments, license key managemen
 - **Machine Fingerprinting**: Limit activations per license to prevent sharing
 - **Stripe Integration**: Subscription payments with automatic license provisioning
 - **Customer Portal**: Self-service license management and downloads
+- **Admin Dashboard**: Full product and license management UI (`/admin.html`)
+- **Product Categories**: Organize products with categories, search, and filtering
 - **Admin API**: Full product and license CRUD operations
-- **S3 Downloads**: Signed URLs for secure software distribution
+- **S3 Downloads**: Signed URLs for secure software distribution (4-hour expiry)
+- **MinIO Support**: S3-compatible storage for local development
 - **Offline Licensing**: RSA-signed tokens for offline validation
+- **Email Notifications**: Microsoft Graph / Office 365 integration
 - **Rate Limiting**: Protection against brute-force attacks
 
 ## Tech Stack
@@ -182,15 +186,29 @@ Content-Type: application/json
 }
 ```
 
+### Admin Dashboard
+
+Access the admin dashboard at `/admin.html` to manage:
+- **Products**: Create, edit, delete with Stripe integration and categories
+- **Licenses**: Create, suspend, revoke, reactivate
+- **Customers**: View customer list
+- **Subscriptions**: View subscription status
+- **Refunds**: Track refunds and license revocations
+
+Admin users see a gear icon in the navigation bar linking to the dashboard.
+
 ### Admin API (`/api/admin`) - Requires Admin JWT
 
 #### Products
 ```http
-GET    /api/admin/products          # List all products
-POST   /api/admin/products          # Create product
-GET    /api/admin/products/:id      # Get product
-PUT    /api/admin/products/:id      # Update product
-DELETE /api/admin/products/:id      # Delete product
+GET    /api/admin/products              # List all products
+GET    /api/admin/products?search=term  # Search products by name/description
+GET    /api/admin/products?category=X   # Filter by category
+GET    /api/admin/products/categories   # List all categories
+POST   /api/admin/products              # Create product
+GET    /api/admin/products/:id          # Get product
+PUT    /api/admin/products/:id          # Update product
+DELETE /api/admin/products/:id          # Delete product
 ```
 
 #### Licenses
@@ -290,6 +308,13 @@ See [`clients/README.md`](clients/README.md) for full documentation.
 │   ├── middleware/           # Auth & rate limiting
 │   ├── utils/                # Helpers
 │   └── types/                # TypeScript types
+├── public/
+│   ├── index.html            # Customer portal
+│   ├── admin.html            # Admin dashboard
+│   ├── favicon.svg           # Site favicon
+│   ├── app.js                # Customer portal JS
+│   ├── admin.js              # Admin dashboard JS
+│   └── styles.css            # Stylesheets
 ├── clients/
 │   ├── node/                 # Node.js/TypeScript SDK
 │   ├── swift/                # Swift SDK (macOS/iOS)
@@ -297,6 +322,9 @@ See [`clients/README.md`](clients/README.md) for full documentation.
 │   └── rust/                 # Rust SDK (cross-platform)
 ├── prisma/
 │   └── schema.prisma         # Database schema
+├── keys/                     # RSA keys for offline licensing
+├── k8s/                      # Kubernetes manifests
+├── docs/                     # Documentation
 ├── docker-compose.yml
 ├── Dockerfile
 └── package.json
@@ -312,6 +340,9 @@ npm run db:generate  # Generate Prisma client
 npm run db:migrate   # Run migrations
 npm run db:push      # Push schema to database
 npm run db:studio    # Open Prisma Studio
+npm test             # Run unit tests
+npm run test:watch   # Run tests in watch mode
+npm run test:coverage # Run tests with coverage report
 ```
 
 ## Docker Deployment
@@ -329,9 +360,38 @@ docker build -t license-server .
 - All admin routes require JWT authentication with admin role
 - License validation endpoints are rate-limited (60 req/min)
 - Authentication endpoints are rate-limited (10 req/15min)
+- Webhook endpoints are rate-limited (100 req/min) with idempotency checks
 - Stripe webhook signatures are verified
 - Passwords are hashed with bcrypt (12 rounds)
 - Machine fingerprinting prevents license sharing
+- Constant-time password comparison prevents timing attacks
+- Generic error messages prevent information disclosure
+
+For a comprehensive security overview, audit results, and deployment checklist, see [docs/SECURITY.md](docs/SECURITY.md).
+
+## Kubernetes Deployment
+
+Deploy to Kubernetes using Kustomize:
+
+```bash
+# Production deployment
+kubectl apply -k k8s/
+
+# Development deployment (includes MinIO + PostgreSQL)
+kubectl apply -k k8s/overlays/dev/
+```
+
+The K8s manifests include:
+- **Deployment**: License server with health probes
+- **Service**: ClusterIP service
+- **ConfigMap**: Environment configuration
+- **Secret**: Sensitive credentials (template)
+- **ServiceAccount**: For IRSA (EKS)
+- **HPA**: Horizontal Pod Autoscaler
+- **MinIO**: S3-compatible storage (dev only)
+- **PostgreSQL**: Database (dev only)
+
+For production, use managed services (RDS, S3) and configure via environment variables or AWS Secrets Manager.
 
 ## Offline Licensing
 

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from './config/index.js';
@@ -10,6 +11,8 @@ import { getCorsConfig, isCorsEnabled } from './config/cors.js';
 import { initializeAuthProvider } from './auth/index.js';
 import { initializeConfigProvider } from './config/providers/index.js';
 import { initializeEmailService } from './services/email.service.js';
+import { initializeRedis, closeRedis, isRedisAvailable } from './config/redis.js';
+import { logger, generateRequestId } from './services/logger.service.js';
 
 import adminRoutes from './routes/admin.js';
 import portalRoutes from './routes/portal.js';
@@ -36,6 +39,15 @@ app.use(helmet({
 if (isCorsEnabled()) {
   app.use(cors(getCorsConfig()));
 }
+
+// Cookie parser for httpOnly auth cookies
+app.use(cookieParser());
+
+// Request ID for correlation
+app.use((req, _res, next) => {
+  req.headers['x-request-id'] = req.headers['x-request-id'] || generateRequestId();
+  next();
+});
 
 // Stripe webhooks need raw body
 app.use('/webhooks', express.raw({ type: 'application/json' }));
@@ -153,13 +165,14 @@ app.use((_req, res) => {
 
 // Error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
+  logger.error('Unhandled error', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
 // Graceful shutdown
 async function shutdown() {
-  console.log('Shutting down...');
+  logger.info('Shutting down...');
+  await closeRedis();
   await disconnectDatabase();
   process.exit(0);
 }
@@ -176,6 +189,9 @@ async function start() {
     // Initialize auth provider (supports jwt, cognito)
     await initializeAuthProvider();
 
+    // Initialize Redis (optional, for distributed rate limiting and token blacklist)
+    await initializeRedis();
+
     // Initialize email service (Microsoft Graph / Office 365)
     initializeEmailService();
 
@@ -184,13 +200,16 @@ async function start() {
 
     const port = parseInt(config.PORT, 10);
     app.listen(port, () => {
-      console.log(`License Server running on port ${port}`);
-      console.log(`Environment: ${config.NODE_ENV}`);
-      console.log(`Config provider: ${process.env.CONFIG_PROVIDER || 'env'}`);
-      console.log(`Auth provider: ${process.env.AUTH_PROVIDER || 'jwt'}`);
+      logger.info('License Server started', {
+        port,
+        environment: config.NODE_ENV,
+        configProvider: process.env.CONFIG_PROVIDER || 'env',
+        authProvider: process.env.AUTH_PROVIDER || 'jwt',
+        redisEnabled: isRedisAvailable(),
+      });
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    logger.error('Failed to start server', error);
     process.exit(1);
   }
 }

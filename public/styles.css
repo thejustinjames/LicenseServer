@@ -110,6 +110,15 @@ nav {
   color: white;
 }
 
+.btn-danger:hover {
+  background: #dc2626;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+}
+
 /* Main Content */
 main {
   max-width: 1200px;
@@ -147,12 +156,50 @@ main {
   margin-bottom: 2rem;
 }
 
+/* Products Filter */
+.products-filter {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 200px;
+  max-width: 300px;
+  padding: 0.625rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.category-select {
+  padding: 0.625rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  background: white;
+  min-width: 150px;
+}
+
+.category-select:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
 /* Products Grid */
 .products-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 1.5rem;
-  margin-top: 2rem;
+  margin-top: 1rem;
 }
 
 .product-card {
@@ -166,6 +213,17 @@ main {
 .product-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+}
+
+.product-category {
+  display: inline-block;
+  background: #eff6ff;
+  color: #2563eb;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-bottom: 0.75rem;
 }
 
 .product-card h3 {
@@ -425,6 +483,95 @@ td {
   border: 1px solid #bfdbfe;
 }
 
+/* Download Info */
+.download-info {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.download-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.download-header h4 {
+  color: #166534;
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.download-icon {
+  width: 32px;
+  height: 32px;
+  color: #10b981;
+  flex-shrink: 0;
+}
+
+.download-warning {
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  color: #92400e;
+  font-size: 0.95rem;
+}
+
+.download-warning strong {
+  color: #78350f;
+}
+
+.download-details {
+  margin-bottom: 1rem;
+}
+
+.download-details p {
+  margin: 0.25rem 0;
+  color: #475569;
+}
+
+.download-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.download-actions .btn-lg {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+.download-note {
+  color: #64748b;
+  font-size: 0.875rem;
+  margin: 0;
+  font-style: italic;
+}
+
+.download-info h4 {
+  color: #166534;
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+}
+
+.download-info p {
+  margin-bottom: 0.5rem;
+  color: #475569;
+}
+
+.download-info .btn {
+  margin-right: 0.5rem;
+  margin-top: 1rem;
+}
+
 /* Loading */
 .loading {
   text-align: center;
@@ -456,6 +603,23 @@ td {
 .user-email {
   color: #64748b;
   font-size: 0.9rem;
+}
+
+.admin-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  color: #64748b;
+  background: #f1f5f9;
+  transition: all 0.2s;
+}
+
+.admin-link:hover {
+  background: #e2e8f0;
+  color: #2563eb;
 }
 
 /* Success Icon */
