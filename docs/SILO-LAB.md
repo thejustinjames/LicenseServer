@@ -130,9 +130,9 @@ dig @localhost -p 10053 licencing.agencio.cloud
 # Expected: 172.30.0.5
 ```
 
-## k8inspector Products
+## Products
 
-5 product tiers seeded for k8inspector (SGD pricing):
+### k8inspector (5 products)
 
 | Product | Monthly | Annual | Type |
 |---------|---------|--------|------|
@@ -141,6 +141,27 @@ dig @localhost -p 10053 licencing.agencio.cloud
 | Enterprise | $199 | $1,990 | Subscription |
 | Enterprise Custom | POA | - | One-time (contact sales) |
 | Enterprise Source | POA | - | One-time (contact sales) |
+
+### SILO (9 products)
+
+| Product | Price | Type |
+|---------|-------|------|
+| SILO Home - Windows | $99 one-time | One-time (1 year license) |
+| SILO Home - macOS | $99 one-time | One-time (1 year license) |
+| SILO Business | $199/mo or $1,990/yr | Subscription |
+| SILO Enterprise | $499/mo or $4,990/yr | Subscription |
+| Enterprise Pack - 5 Licenses | $22,500/yr | Subscription |
+| Enterprise Pack - 10 Licenses | $40,000/yr | Subscription |
+| Enterprise Pack - 20 Licenses | $70,000/yr | Subscription |
+| Enterprise Pack - 50 Licenses | $150,000/yr | Subscription |
+| SILO Enterprise Custom | POA | One-time (contact sales) |
+
+### SILO Add-ons (2 products)
+
+| Product | Monthly | Annual | Type |
+|---------|---------|--------|------|
+| SILO k8inspector Integration | $49 | $490 | Subscription |
+| SILO Docker Monitor | $29 | $290 | Subscription |
 
 ## API Endpoints
 
@@ -165,6 +186,10 @@ dig @localhost -p 10053 licencing.agencio.cloud
 - `POST /api/admin/licenses` - Create license
 - `GET /api/admin/products` - List products
 - `POST /api/admin/products` - Create product
+- `POST /api/admin/products/:id/upload` - Upload bundle file
+- `GET /api/admin/products/:id/bundles` - List product bundles
+- `PUT /api/admin/products/:id/bundle` - Set active bundle
+- `DELETE /api/admin/products/:id/bundles/:key` - Delete bundle file
 
 ## Troubleshooting
 
@@ -203,10 +228,61 @@ docker ps | grep license-server
 docker exec silo-nginx curl -s http://172.30.0.50:3000/health
 ```
 
+## MinIO Storage (S3)
+
+Download packages are stored in MinIO at `silo-storage:9000`.
+
+**Bucket:** `license-server-downloads`
+
+```
+license-server-downloads/
+├── k8inspector/
+│   └── (k8inspector packages)
+└── silo/
+    ├── windows/
+    │   └── silo-home-windows-x64.zip
+    ├── macos/
+    │   └── silo-home-macos-arm64.zip
+    ├── business/
+    │   └── silo-business-multiplatform.zip
+    ├── enterprise/
+    │   └── silo-enterprise-multiplatform.zip
+    └── addons/
+        ├── silo-k8inspector-addon.zip
+        └── silo-docker-monitor-addon.zip
+```
+
+### Upload a Package
+
+**Option 1: Admin Panel (Recommended)**
+
+1. Go to Admin Panel: https://licencing.agencio.cloud/admin.html
+2. Navigate to Products
+3. Click Edit on the product
+4. In the "Download Package" section, use the file upload area to upload a .zip, .tar, .exe, .dmg, etc.
+5. The file is automatically stored in MinIO with the path: `{category}/{product-name}/filename-vX.X.X.ext`
+6. Check "Set as active bundle after upload" to make it the active download
+
+**Option 2: mc CLI (Manual)**
+
+```bash
+# Using mc CLI
+docker run --rm --network silo-lab -v /path/to/package:/data minio/mc:latest \
+  sh -c "mc alias set silo http://silo-storage:9000 silo-admin silo-secret-key && \
+         mc cp /data/package.zip silo/license-server-downloads/silo/windows/silo-home-windows-x64.zip"
+```
+
+### MinIO Console
+
+Access MinIO console at: http://localhost:19001
+- Username: `silo-admin`
+- Password: `silo-secret-key`
+
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `docker-compose.silo.yml` | Silo-lab deployment config |
 | `prisma/seed-k8inspector.ts` | k8inspector product seeding |
+| `prisma/seed-silo.ts` | SILO product seeding |
 | `docs/SILO-LAB.md` | This document |

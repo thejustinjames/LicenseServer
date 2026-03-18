@@ -20,7 +20,9 @@ type EmailTemplate =
   | 'license_activated'
   | 'license_revoked'
   | 'subscription_canceled'
-  | 'password_reset';
+  | 'password_reset'
+  | 'seat_invite'
+  | 'quote_sent';
 
 interface EmailData {
   to: string;
@@ -268,6 +270,59 @@ function getEmailContent(template: EmailTemplate, data: Record<string, string | 
         `,
       };
 
+    case 'seat_invite':
+      return {
+        subject: `You've been assigned a ${data.productName} license`,
+        body: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #2563eb;">You've Been Assigned a License!</h1>
+            <p>Hi ${data.name || 'there'},</p>
+            <p><strong>${data.assignedBy}</strong> has assigned you a seat for <strong>${data.productName}</strong>.</p>
+            <p>Click the button below to activate your license:</p>
+            <p style="margin: 24px 0;">
+              <a href="${data.inviteUrl}" style="background: #10b981; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">
+                Activate License
+              </a>
+            </p>
+            <p>This will create your account and activate your seat on your device.</p>
+            <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
+              If the button doesn't work, copy and paste this link into your browser:<br>
+              <a href="${data.inviteUrl}">${data.inviteUrl}</a>
+            </p>
+            <p>If you have any questions, please contact us at <a href="mailto:${supportEmail}">${supportEmail}</a>.</p>
+            <p>Best regards,<br>The ${appName} Team</p>
+          </div>
+        `,
+      };
+
+    case 'quote_sent':
+      return {
+        subject: `Your Quote from ${appName} - ${data.quoteNumber}`,
+        body: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #2563eb;">Your Quote is Ready</h1>
+            <p>Hi ${data.name || 'there'},</p>
+            <p>Thank you for your interest in <strong>${data.productName}</strong>.</p>
+            <div style="background: #f1f5f9; padding: 20px; border-radius: 8px; margin: 24px 0;">
+              <p style="margin: 0 0 12px 0;"><strong>Quote Number:</strong> ${data.quoteNumber}</p>
+              <p style="margin: 0 0 12px 0;"><strong>Product:</strong> ${data.productName}</p>
+              <p style="margin: 0 0 12px 0;"><strong>Seats:</strong> ${data.seatCount}</p>
+              <p style="margin: 0 0 12px 0;"><strong>Term:</strong> ${data.termYears} year(s)</p>
+              <p style="margin: 0;"><strong>Total:</strong> $${(Number(data.finalPrice) / 100).toFixed(2)} ${data.currency?.toString().toUpperCase()}</p>
+            </div>
+            <p>This quote is valid until <strong>${data.validUntil}</strong>.</p>
+            <p>To proceed with your purchase, please contact our sales team or click below:</p>
+            <p style="margin: 24px 0;">
+              <a href="${data.acceptUrl}" style="background: #10b981; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">
+                Accept Quote
+              </a>
+            </p>
+            <p>If you have any questions, please contact us at <a href="mailto:${supportEmail}">${supportEmail}</a>.</p>
+            <p>Best regards,<br>The ${appName} Team</p>
+          </div>
+        `,
+      };
+
     default:
       return {
         subject: `Notification from ${appName}`,
@@ -389,5 +444,50 @@ export async function sendPasswordResetEmail(
     toName: name,
     template: 'password_reset',
     data: { name, resetUrl, expiryHours },
+  });
+}
+
+export async function sendSeatInviteEmail(
+  to: string,
+  name: string | undefined,
+  productName: string,
+  assignedBy: string,
+  inviteUrl: string
+): Promise<boolean> {
+  return sendEmail({
+    to,
+    toName: name,
+    template: 'seat_invite',
+    data: { name, productName, assignedBy, inviteUrl },
+  });
+}
+
+export async function sendQuoteEmail(
+  to: string,
+  name: string | undefined,
+  quoteNumber: string,
+  productName: string,
+  seatCount: number,
+  termYears: number,
+  finalPrice: number,
+  currency: string,
+  validUntil: string,
+  acceptUrl: string
+): Promise<boolean> {
+  return sendEmail({
+    to,
+    toName: name,
+    template: 'quote_sent',
+    data: {
+      name,
+      quoteNumber,
+      productName,
+      seatCount,
+      termYears,
+      finalPrice,
+      currency,
+      validUntil,
+      acceptUrl,
+    },
   });
 }

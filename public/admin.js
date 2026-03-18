@@ -583,6 +583,9 @@ function openProductModal(product) {
   // Load categories for autocomplete
   loadCategories();
 
+  // Initialize file upload handlers
+  initFileUpload();
+
   if (product) {
     document.getElementById('productModalTitle').textContent = 'Edit Product';
     document.getElementById('productId').value = product.id;
@@ -595,9 +598,23 @@ function openProductModal(product) {
     document.getElementById('pricingType').value = product.pricingType || 'FIXED';
     document.getElementById('s3PackageKey').value = product.s3PackageKey || '';
     document.getElementById('productVersion').value = product.version || '';
+
+    // Set current product ID for file uploads
+    currentProductId = product.id;
+
+    // Show bundle upload section and load existing bundles
+    document.getElementById('bundleUploadSection').style.display = 'block';
+    document.getElementById('bundlesSection').style.display = 'block';
+    loadProductBundles(product.id);
   } else {
     document.getElementById('productModalTitle').textContent = 'Add Product';
     document.getElementById('productId').value = '';
+    currentProductId = null;
+
+    // Hide bundle sections for new products (need to save first)
+    document.getElementById('bundleUploadSection').style.display = 'none';
+    document.getElementById('bundlesSection').style.display = 'none';
+    document.getElementById('bundlesList').innerHTML = '<p class="no-bundles">Save the product first to upload bundles.</p>';
   }
 }
 
@@ -656,9 +673,25 @@ function handleProductSubmit(e) {
   var url = id ? '/api/admin/products/' + id : '/api/admin/products';
 
   api(url, { method: method, body: JSON.stringify(data) })
-    .then(function() {
-      closeProductModal();
-      loadProducts();
+    .then(function(savedProduct) {
+      // If this was a new product, update currentProductId and show upload sections
+      if (!id && savedProduct && savedProduct.id) {
+        currentProductId = savedProduct.id;
+        document.getElementById('productId').value = savedProduct.id;
+        document.getElementById('bundleUploadSection').style.display = 'block';
+        document.getElementById('bundlesSection').style.display = 'block';
+        document.getElementById('bundlesList').innerHTML = '<p class="no-bundles">No bundles uploaded yet.</p>';
+
+        // Update modal title
+        document.getElementById('productModalTitle').textContent = 'Edit Product';
+
+        // Notify user they can now upload
+        alert('Product created! You can now upload bundle files.');
+        loadProducts();
+      } else {
+        closeProductModal();
+        loadProducts();
+      }
     })
     .catch(function(error) {
       alert('Failed to save product: ' + error.message);
@@ -1027,4 +1060,233 @@ function formatCurrency(amount, currency) {
   var value = (amount / 100).toFixed(2);
   var symbols = { usd: '$', eur: '€', gbp: '£' };
   return (symbols[currency] || '$') + value;
+}
+
+// ============================================================================
+// FILE UPLOAD & BUNDLE MANAGEMENT
+// ============================================================================
+
+var currentProductId = null;
+
+function initFileUpload() {
+  var uploadArea = document.getElementById('fileUploadArea');
+  var fileInput = document.getElementById('bundleFile');
+
+  if (!uploadArea || !fileInput) return;
+
+  // Click to upload
+  uploadArea.addEventListener('click', function(e) {
+    if (e.target.closest('.upload-progress')) return;
+    fileInput.click();
+  });
+
+  // File selected
+  fileInput.addEventListener('change', function() {
+    if (this.files && this.files[0]) {
+      uploadBundleFile(this.files[0]);
+    }
+  });
+
+  // Drag and drop
+  uploadArea.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.classList.add('dragover');
+  });
+
+  uploadArea.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.classList.remove('dragover');
+  });
+
+  uploadArea.addEventListener('drop', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.classList.remove('dragover');
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      uploadBundleFile(e.dataTransfer.files[0]);
+    }
+  });
+}
+
+function uploadBundleFile(file) {
+  if (!currentProductId) {
+    alert('Please save the product first before uploading files.');
+    return;
+  }
+
+  var uploadPlaceholder = document.getElementById('uploadPlaceholder');
+  var uploadProgress = document.getElementById('uploadProgress');
+  var progressFill = document.getElementById('progressFill');
+  var uploadStatus = document.getElementById('uploadStatus');
+  var setActive = document.getElementById('setActiveOnUpload').checked;
+  var version = document.getElementById('productVersion').value;
+
+  // Show progress
+  uploadPlaceholder.classList.add('hidden');
+  uploadProgress.classList.remove('hidden');
+  progressFill.style.width = '0%';
+  uploadStatus.textContent = 'Preparing upload...';
+
+  // Create form data
+  var formData = new FormData();
+  formData.append('file', file);
+  formData.append('setActive', setActive ? 'true' : 'false');
+  if (version) {
+    formData.append('version', version);
+  }
+
+  // Upload with XHR for progress tracking
+  var xhr = new XMLHttpRequest();
+
+  xhr.upload.addEventListener('progress', function(e) {
+    if (e.lengthComputable) {
+      var percent = Math.round((e.loaded / e.total) * 100);
+      progressFill.style.width = percent + '%';
+      uploadStatus.textContent = 'Uploading... ' + percent + '%';
+    }
+  });
+
+  xhr.addEventListener('load', function() {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      var response = JSON.parse(xhr.responseText);
+      uploadStatus.textContent = 'Upload complete!';
+      progressFill.style.width = '100%';
+
+      // Update the active bundle field if set as active
+      if (response.setActive) {
+        document.getElementById('s3PackageKey').value = response.key;
+      }
+
+      // Reload bundles list
+      loadProductBundles(currentProductId);
+
+      // Reset after delay
+      setTimeout(function() {
+        uploadPlaceholder.classList.remove('hidden');
+        uploadProgress.classList.add('hidden');
+        document.getElementById('bundleFile').value = '';
+      }, 2000);
+    } else {
+      var error = 'Upload failed';
+      try {
+        var errResponse = JSON.parse(xhr.responseText);
+        error = errResponse.error || error;
+      } catch (e) {}
+      uploadStatus.textContent = 'Error: ' + error;
+      progressFill.style.background = '#ef4444';
+
+      setTimeout(function() {
+        uploadPlaceholder.classList.remove('hidden');
+        uploadProgress.classList.add('hidden');
+        progressFill.style.background = '';
+        document.getElementById('bundleFile').value = '';
+      }, 3000);
+    }
+  });
+
+  xhr.addEventListener('error', function() {
+    uploadStatus.textContent = 'Network error. Please try again.';
+    progressFill.style.background = '#ef4444';
+
+    setTimeout(function() {
+      uploadPlaceholder.classList.remove('hidden');
+      uploadProgress.classList.add('hidden');
+      progressFill.style.background = '';
+      document.getElementById('bundleFile').value = '';
+    }, 3000);
+  });
+
+  xhr.open('POST', API_URL + '/api/admin/products/' + currentProductId + '/upload');
+
+  // Include auth header
+  if (token) {
+    xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+  }
+
+  xhr.withCredentials = true;
+  xhr.send(formData);
+}
+
+function loadProductBundles(productId) {
+  var bundlesList = document.getElementById('bundlesList');
+  if (!bundlesList) return;
+
+  bundlesList.innerHTML = '<p class="loading">Loading bundles...</p>';
+
+  api('/api/admin/products/' + productId + '/bundles')
+    .then(function(response) {
+      if (!response.s3Configured) {
+        bundlesList.innerHTML = '<p class="no-bundles">S3 storage not configured.</p>';
+        return;
+      }
+
+      var bundles = response.bundles || [];
+      if (bundles.length === 0) {
+        bundlesList.innerHTML = '<p class="no-bundles">No bundles uploaded yet.</p>';
+        return;
+      }
+
+      var html = '';
+      for (var i = 0; i < bundles.length; i++) {
+        var bundle = bundles[i];
+        var activeClass = bundle.isActive ? ' active' : '';
+        var activeBadge = bundle.isActive ? '<span class="active-badge">Active</span>' : '';
+        var date = new Date(bundle.lastModified).toLocaleDateString();
+
+        html += '<div class="bundle-item' + activeClass + '">';
+        html += '  <div class="bundle-info">';
+        html += '    <div class="bundle-name">' + escapeHtml(bundle.filename) + activeBadge + '</div>';
+        html += '    <div class="bundle-meta">' + bundle.sizeFormatted + ' • ' + date + '</div>';
+        html += '  </div>';
+        html += '  <div class="bundle-actions">';
+        if (!bundle.isActive) {
+          html += '    <button class="btn btn-primary btn-sm" onclick="setActiveBundle(\'' + escapeHtml(bundle.key) + '\')">Set Active</button>';
+          html += '    <button class="btn btn-danger btn-sm" onclick="deleteBundle(\'' + escapeHtml(bundle.key) + '\')">Delete</button>';
+        }
+        html += '  </div>';
+        html += '</div>';
+      }
+
+      bundlesList.innerHTML = html;
+    })
+    .catch(function(error) {
+      console.error('Failed to load bundles:', error);
+      bundlesList.innerHTML = '<p class="no-bundles">Failed to load bundles.</p>';
+    });
+}
+
+function setActiveBundle(key) {
+  if (!currentProductId) return;
+
+  var version = document.getElementById('productVersion').value || undefined;
+
+  api('/api/admin/products/' + currentProductId + '/bundle', {
+    method: 'PUT',
+    body: JSON.stringify({ s3PackageKey: key, version: version })
+  })
+    .then(function(product) {
+      document.getElementById('s3PackageKey').value = key;
+      loadProductBundles(currentProductId);
+    })
+    .catch(function(error) {
+      alert('Failed to set active bundle: ' + error.message);
+    });
+}
+
+function deleteBundle(key) {
+  if (!currentProductId) return;
+  if (!confirm('Delete this bundle file? This cannot be undone.')) return;
+
+  api('/api/admin/products/' + currentProductId + '/bundles/' + encodeURIComponent(key), {
+    method: 'DELETE'
+  })
+    .then(function() {
+      loadProductBundles(currentProductId);
+    })
+    .catch(function(error) {
+      alert('Failed to delete bundle: ' + error.message);
+    });
 }

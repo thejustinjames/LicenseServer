@@ -16,8 +16,8 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Install openssl for Prisma
-RUN apk add --no-cache openssl
+# Install openssl for Prisma and curl for health checks
+RUN apk add --no-cache openssl curl
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 appuser
@@ -35,4 +35,4 @@ USER appuser
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && npm start"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate && npm start"]

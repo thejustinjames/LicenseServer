@@ -1,4 +1,10 @@
-import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { s3Client } from '../config/s3.js';
 import { config } from '../config/index.js';
@@ -183,4 +189,154 @@ export async function getFileInfo(key: string): Promise<S3FileInfo | null> {
  */
 export function isS3Configured(): boolean {
   return !!config.S3_BUCKET_NAME;
+}
+
+/**
+ * Upload a file to S3
+ */
+export interface UploadResult {
+  key: string;
+  size: number;
+  contentType: string;
+}
+
+export async function uploadFile(
+  key: string,
+  body: Buffer,
+  contentType: string
+): Promise<UploadResult> {
+  if (!config.S3_BUCKET_NAME) {
+    throw new Error('S3 bucket not configured');
+  }
+
+  const command = new PutObjectCommand({
+    Bucket: config.S3_BUCKET_NAME,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+  });
+
+  await s3Client.send(command);
+
+  return {
+    key,
+    size: body.length,
+    contentType,
+  };
+}
+
+/**
+ * List files in a prefix (folder)
+ */
+export interface S3ListItem {
+  key: string;
+  size: number;
+  lastModified: Date;
+  filename: string;
+}
+
+export async function listFiles(prefix: string): Promise<S3ListItem[]> {
+  if (!config.S3_BUCKET_NAME) {
+    return [];
+  }
+
+  try {
+    const command = new ListObjectsV2Command({
+      Bucket: config.S3_BUCKET_NAME,
+      Prefix: prefix,
+    });
+
+    const response = await s3Client.send(command);
+    const items: S3ListItem[] = [];
+
+    if (response.Contents) {
+      for (const obj of response.Contents) {
+        if (obj.Key && obj.Size && obj.Size > 0) {
+          items.push({
+            key: obj.Key,
+            size: obj.Size,
+            lastModified: obj.LastModified || new Date(),
+            filename: obj.Key.split('/').pop() || obj.Key,
+          });
+        }
+      }
+    }
+
+    // Sort by last modified, newest first
+    items.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
+
+    return items;
+  } catch (error) {
+    console.error('Failed to list files:', error);
+    return [];
+  }
+}
+
+/**
+ * Delete a file from S3
+ */
+export async function deleteFile(key: string): Promise<boolean> {
+  if (!config.S3_BUCKET_NAME) {
+    return false;
+  }
+
+  try {
+    const command = new DeleteObjectCommand({
+      Bucket: config.S3_BUCKET_NAME,
+      Key: key,
+    });
+
+    await s3Client.send(command);
+    return true;
+  } catch (error) {
+    console.error('Failed to delete file:', error);
+    return false;
+  }
+}
+
+/**
+ * Generate a unique file key for a product
+ */
+export function generateProductFileKey(
+  category: string,
+  productName: string,
+  filename: string,
+  version?: string
+): string {
+  // Sanitize category and product name for use as path components
+  const sanitize = (str: string) =>
+    str
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+  const categoryPath = sanitize(category || 'products');
+  const productPath = sanitize(productName);
+
+  // Add version to filename if provided
+  if (version) {
+    const ext = filename.includes('.') ? filename.substring(filename.lastIndexOf('.')) : '';
+    const base = filename.includes('.') ? filename.substring(0, filename.lastIndexOf('.')) : filename;
+    filename = `${base}-v${version}${ext}`;
+  }
+
+  return `${categoryPath}/${productPath}/${filename}`;
+}
+
+/**
+ * Get folder prefix for a product's bundles
+ */
+export function getProductBundlePrefix(category: string, productName: string): string {
+  const sanitize = (str: string) =>
+    str
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+  const categoryPath = sanitize(category || 'products');
+  const productPath = sanitize(productName);
+
+  return `${categoryPath}/${productPath}/`;
 }

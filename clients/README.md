@@ -77,6 +77,121 @@ cargo build --release --target aarch64-pc-windows-msvc   # Windows ARM64
 
 ---
 
+## Desktop App Integration
+
+For desktop applications (Windows/macOS), use the desktop-specific endpoints that provide:
+- **Offline token**: Allows the app to work offline within a grace period
+- **Periodic check-in**: Renews the offline token
+- **Platform tracking**: Records which OS is being used
+
+### C# (Windows Desktop)
+
+```csharp
+using LicenseClient;
+
+var client = new LicenseClient(new LicenseClientConfig
+{
+    ServerUrl = "https://license.agencio.cloud",
+    AppVersion = "1.0.0",
+    UseDesktopEndpoints = true,  // Use /api/v1/desktop/* endpoints
+    CheckInInterval = TimeSpan.FromDays(7),
+    OfflineGracePeriod = TimeSpan.FromDays(7)
+});
+
+// Desktop validation with offline token
+var result = await client.ValidateDesktopAsync("XXXX-XXXX-XXXX-XXXX");
+if (result.Valid)
+{
+    Console.WriteLine($"Product: {result.Product}");
+    Console.WriteLine($"Offline token: {result.OfflineToken != null}");
+    Console.WriteLine($"Check-in every: {result.CheckInDays} days");
+}
+
+// Auto check-in (validates + checks in if needed)
+var autoResult = await client.ValidateWithAutoCheckInAsync("XXXX-XXXX-XXXX-XXXX");
+
+// Manual check-in to renew offline token
+var checkIn = await client.CheckInAsync("XXXX-XXXX-XXXX-XXXX");
+if (checkIn.Valid)
+{
+    Console.WriteLine($"Token renewed, next check-in: {checkIn.NextCheckIn}");
+}
+```
+
+### Swift (macOS Desktop)
+
+```swift
+import LicenseClient
+
+let client = LicenseClient(config: LicenseClientConfig(
+    serverUrl: "https://license.agencio.cloud",
+    appVersion: "1.0.0",
+    useDesktopEndpoints: true,
+    checkInIntervalDays: 7,
+    offlineGracePeriodDays: 7
+))
+
+// Desktop validation with offline token
+let result = await client.validateDesktop(licenseKey: "XXXX-XXXX-XXXX-XXXX")
+if result.valid {
+    print("Product: \(result.product ?? "")")
+    print("Offline token available: \(result.offlineToken != nil)")
+    print("Check-in every: \(result.checkInDays) days")
+}
+
+// Auto check-in (validates + checks in if needed)
+let autoResult = await client.validateWithAutoCheckIn(licenseKey: "XXXX-XXXX-XXXX-XXXX")
+
+// Manual check-in
+let checkIn = await client.checkIn(licenseKey: "XXXX-XXXX-XXXX-XXXX")
+if checkIn.valid {
+    print("Token renewed, next check-in: \(checkIn.nextCheckIn ?? "")")
+}
+```
+
+### Desktop Validation Flow
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│                    Desktop Application                         │
+├───────────────────────────────────────────────────────────────┤
+│                                                                │
+│   1. First Launch                                              │
+│      │                                                         │
+│      ▼                                                         │
+│   ┌──────────────────────┐                                     │
+│   │ POST /desktop/validate│ ──▶ License Server                 │
+│   │  + platform: windows  │      Returns: offlineToken,        │
+│   │  + appVersion: 1.0.0  │              checkInDays: 7        │
+│   └──────────┬───────────┘                                     │
+│              │                                                 │
+│              ▼                                                 │
+│   ┌──────────────────────┐                                     │
+│   │ Store offline token  │                                     │
+│   │ Record check-in date │                                     │
+│   └──────────┬───────────┘                                     │
+│              │                                                 │
+│   2. Subsequent Launches (within 7 days)                       │
+│      │                                                         │
+│      ▼                                                         │
+│   ┌──────────────────────┐                                     │
+│   │ Use cached token     │ ◀── No network needed               │
+│   │ App works offline!   │                                     │
+│   └──────────┬───────────┘                                     │
+│              │                                                 │
+│   3. After 7 days (check-in required)                          │
+│      │                                                         │
+│      ▼                                                         │
+│   ┌──────────────────────┐                                     │
+│   │ POST /desktop/checkin│ ──▶ License Server                  │
+│   │  Returns: renewedToken│     Renews for another 7 days      │
+│   └──────────────────────┘                                     │
+│                                                                │
+└───────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Quick Start Examples
 
 ### Node.js (Vite/Express/Electron)

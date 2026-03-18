@@ -18,6 +18,7 @@ import adminRoutes from './routes/admin.js';
 import portalRoutes from './routes/portal.js';
 import validationRoutes from './routes/validation.js';
 import webhookRoutes from './routes/webhooks.js';
+import desktopRoutes from './routes/desktop.js';
 
 const app = express();
 
@@ -59,6 +60,7 @@ app.use(express.json());
 app.use('/api/admin', adminRoutes);
 app.use('/api/portal', portalRoutes);
 app.use('/api/v1', validationRoutes);
+app.use('/api/v1/desktop', desktopRoutes);
 app.use('/webhooks', webhookRoutes);
 
 // Serve static frontend
@@ -76,6 +78,7 @@ app.get('/api', (_req, res) => {
       admin: '/api/admin',
       portal: '/api/portal',
       validation: '/api/v1',
+      desktop: '/api/v1/desktop',
       webhooks: '/webhooks/stripe',
       health: '/health',
       ready: '/health/ready',

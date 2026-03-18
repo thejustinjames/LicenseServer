@@ -426,14 +426,51 @@
         <h3>Download Package (S3/MinIO)</h3>
 
         <div class="form-group">
-          <label for="s3PackageKey">S3 File Path</label>
-          <input type="text" id="s3PackageKey" placeholder="e.g., downloads/myapp-v1.0.0.zip">
-          <small>Path to the downloadable file in S3. After purchase, users can download for 4 hours.</small>
+          <label for="productVersion">Version</label>
+          <input type="text" id="productVersion" placeholder="e.g., 1.0.0">
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="form-group" id="bundleUploadSection">
+          <label>Upload New Bundle</label>
+          <div class="file-upload-area" id="fileUploadArea">
+            <input type="file" id="bundleFile" accept=".zip,.tar,.gz,.tgz,.7z,.exe,.msi,.dmg,.pkg,.deb,.rpm" style="display: none;">
+            <div class="upload-placeholder" id="uploadPlaceholder">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <p>Click or drag file to upload</p>
+              <small>.zip, .tar, .gz, .exe, .dmg, .pkg (max 500MB)</small>
+            </div>
+            <div class="upload-progress hidden" id="uploadProgress">
+              <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+              </div>
+              <span id="uploadStatus">Uploading...</span>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top: 0.5rem;">
+            <label class="checkbox-label">
+              <input type="checkbox" id="setActiveOnUpload" checked>
+              Set as active bundle after upload
+            </label>
+          </div>
+        </div>
+
+        <!-- Existing Bundles List -->
+        <div class="form-group" id="bundlesSection">
+          <label>Available Bundles</label>
+          <div class="bundles-list" id="bundlesList">
+            <p class="loading">Loading bundles...</p>
+          </div>
         </div>
 
         <div class="form-group">
-          <label for="productVersion">Version</label>
-          <input type="text" id="productVersion" placeholder="e.g., 1.0.0">
+          <label for="s3PackageKey">Active Bundle Path</label>
+          <input type="text" id="s3PackageKey" placeholder="e.g., downloads/myapp-v1.0.0.zip" readonly>
+          <small>Currently active downloadable file. Select from bundles above or upload a new one.</small>
         </div>
 
         <div class="modal-footer">

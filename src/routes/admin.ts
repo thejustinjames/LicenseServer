@@ -1,13 +1,59 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import multer from 'multer';
 import { authenticate } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
 import * as productService from '../services/product.service.js';
 import * as licenseService from '../services/license.service.js';
 import * as customerService from '../services/customer.service.js';
 import * as paymentService from '../services/payment.service.js';
+import * as storageService from '../services/storage.service.js';
+import * as seatService from '../services/seat.service.js';
+import * as quoteService from '../services/quote.service.js';
+import * as desktopService from '../services/desktop.service.js';
 import { prisma } from '../config/database.js';
 import type { AuthenticatedRequest } from '../types/index.js';
+
+// Configure multer for memory storage (files up to 500MB)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 500 * 1024 * 1024, // 500MB max
+  },
+  fileFilter: (_req, file, cb) => {
+    // Allow common archive and installer types
+    const allowedTypes = [
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/x-tar',
+      'application/gzip',
+      'application/x-gzip',
+      'application/x-bzip2',
+      'application/x-7z-compressed',
+      'application/x-rar-compressed',
+      'application/octet-stream', // Generic binary
+      'application/x-msdownload', // .exe
+      'application/x-msi', // .msi
+      'application/x-apple-diskimage', // .dmg
+      'application/vnd.debian.binary-package', // .deb
+      'application/x-rpm', // .rpm
+    ];
+
+    // Also check by extension for fallback
+    const allowedExtensions = [
+      '.zip', '.tar', '.gz', '.tgz', '.bz2', '.7z', '.rar',
+      '.exe', '.msi', '.dmg', '.pkg', '.deb', '.rpm', '.AppImage',
+    ];
+
+    const ext = '.' + (file.originalname.split('.').pop() || '').toLowerCase();
+
+    if (allowedTypes.includes(file.mimetype) || allowedExtensions.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type not allowed: ${file.mimetype} (${ext})`));
+    }
+  },
+});
 
 const router = Router();
 
@@ -266,6 +312,309 @@ router.get('/licenses/:id/offline-token', async (req: AuthenticatedRequest, res:
   } catch (error) {
     console.error('Generate offline token error:', error);
     res.status(500).json({ error: 'Failed to generate offline token' });
+  }
+});
+
+// ============================================================================
+// SEAT MANAGEMENT
+// ============================================================================
+
+const assignSeatSchema = z.object({
+  email: z.string().email(),
+  name: z.string().optional(),
+  sendInvite: z.boolean().optional().default(true),
+});
+
+const bulkAssignSeatsSchema = z.object({
+  assignments: z.array(z.object({
+    email: z.string().email(),
+    name: z.string().optional(),
+  })).min(1).max(100),
+  sendInvites: z.boolean().optional().default(true),
+});
+
+// Get seat assignments for a license
+router.get('/licenses/:id/seats', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await seatService.getSeatAssignments(req.params.id);
+
+    if (!result.license) {
+      res.status(404).json({ error: 'License not found' });
+      return;
+    }
+
+    res.json({
+      seats: result.seats,
+      available: result.available,
+      total: result.total,
+    });
+  } catch (error) {
+    console.error('Get seat assignments error:', error);
+    res.status(500).json({ error: 'Failed to get seat assignments' });
+  }
+});
+
+// Assign a seat to a user
+router.post('/licenses/:id/seats', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = assignSeatSchema.parse(req.body);
+
+    const result = await seatService.assignSeat({
+      licenseId: req.params.id,
+      email: data.email,
+      name: data.name,
+      assignedBy: req.user?.email,
+      sendInvite: data.sendInvite,
+    });
+
+    if (!result.success) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    res.status(201).json({
+      assignment: result.assignment,
+      inviteUrl: result.inviteUrl,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Assign seat error:', error);
+    res.status(500).json({ error: 'Failed to assign seat' });
+  }
+});
+
+// Bulk assign seats
+router.post('/licenses/:id/seats/bulk', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = bulkAssignSeatsSchema.parse(req.body);
+
+    const result = await seatService.bulkAssignSeats(
+      req.params.id,
+      data.assignments,
+      req.user?.email,
+      data.sendInvites
+    );
+
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Bulk assign seats error:', error);
+    res.status(500).json({ error: 'Failed to bulk assign seats' });
+  }
+});
+
+// Remove a seat assignment
+router.delete('/licenses/:id/seats/:email', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await seatService.removeSeat(req.params.id, req.params.email);
+
+    if (!result.success) {
+      res.status(404).json({ error: result.error });
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Remove seat error:', error);
+    res.status(500).json({ error: 'Failed to remove seat' });
+  }
+});
+
+// Resend seat invite
+router.post('/licenses/:id/seats/:email/resend', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await seatService.resendSeatInvite(req.params.id, req.params.email);
+
+    if (!result.success) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    res.json({ success: true, message: 'Invite resent' });
+  } catch (error) {
+    console.error('Resend seat invite error:', error);
+    res.status(500).json({ error: 'Failed to resend invite' });
+  }
+});
+
+// Get desktop activations for a license
+router.get('/licenses/:id/activations', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await desktopService.listDesktopActivations(req.params.id);
+    res.json(result);
+  } catch (error) {
+    console.error('List activations error:', error);
+    res.status(500).json({ error: 'Failed to list activations' });
+  }
+});
+
+// Revoke a specific activation
+router.delete('/activations/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await desktopService.revokeActivation(req.params.id);
+
+    if (!result.success) {
+      res.status(404).json({ error: result.error });
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Revoke activation error:', error);
+    res.status(500).json({ error: 'Failed to revoke activation' });
+  }
+});
+
+// ============================================================================
+// ENTERPRISE QUOTES
+// ============================================================================
+
+const createQuoteSchema = z.object({
+  productId: z.string().uuid(),
+  contactEmail: z.string().email(),
+  contactName: z.string().optional(),
+  companyName: z.string().optional(),
+  customerId: z.string().uuid().optional(),
+  seatCount: z.number().positive(),
+  term: z.enum(['SUBSCRIPTION', 'PERPETUAL', 'MULTI_YEAR']).optional(),
+  termYears: z.number().positive().max(5).optional(),
+  discount: z.number().min(0).max(1).optional(),
+  customFeatures: z.array(z.string()).optional(),
+  notes: z.string().optional(),
+  validDays: z.number().positive().optional(),
+});
+
+// List quotes
+router.get('/quotes', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const quotes = await quoteService.listQuotes({
+      status: req.query.status as 'DRAFT' | 'SENT' | 'ACCEPTED' | undefined,
+      customerId: req.query.customerId as string | undefined,
+      productId: req.query.productId as string | undefined,
+    });
+    res.json(quotes);
+  } catch (error) {
+    console.error('List quotes error:', error);
+    res.status(500).json({ error: 'Failed to list quotes' });
+  }
+});
+
+// Create a quote
+router.post('/quotes', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = createQuoteSchema.parse(req.body);
+    const quote = await quoteService.createQuote(data);
+    res.status(201).json(quote);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Create quote error:', error);
+    res.status(500).json({ error: 'Failed to create quote' });
+  }
+});
+
+// Get quote by ID
+router.get('/quotes/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const quote = await quoteService.getQuoteById(req.params.id);
+    if (!quote) {
+      res.status(404).json({ error: 'Quote not found' });
+      return;
+    }
+    res.json(quote);
+  } catch (error) {
+    console.error('Get quote error:', error);
+    res.status(500).json({ error: 'Failed to get quote' });
+  }
+});
+
+// Send quote to customer
+router.post('/quotes/:id/send', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await quoteService.sendQuote(req.params.id);
+
+    if (!result.success) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    res.json({ success: true, message: 'Quote sent' });
+  } catch (error) {
+    console.error('Send quote error:', error);
+    res.status(500).json({ error: 'Failed to send quote' });
+  }
+});
+
+// Update quote status
+router.put('/quotes/:id/status', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const statusSchema = z.object({
+      status: z.enum(['DRAFT', 'SENT', 'VIEWED', 'ACCEPTED', 'REJECTED', 'EXPIRED']),
+    });
+
+    const data = statusSchema.parse(req.body);
+    const quote = await quoteService.updateQuoteStatus(req.params.id, data.status);
+    res.json(quote);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Update quote status error:', error);
+    res.status(500).json({ error: 'Failed to update quote status' });
+  }
+});
+
+// Convert quote to license
+router.post('/quotes/:id/convert', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const convertSchema = z.object({
+      customerId: z.string().uuid(),
+    });
+
+    const data = convertSchema.parse(req.body);
+    const result = await quoteService.convertQuoteToLicense(req.params.id, data.customerId);
+
+    if (!result.success) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    res.json({
+      success: true,
+      licenseId: result.licenseId,
+      licenseKey: result.licenseKey,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Convert quote error:', error);
+    res.status(500).json({ error: 'Failed to convert quote' });
+  }
+});
+
+// Duplicate quote
+router.post('/quotes/:id/duplicate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const quote = await quoteService.duplicateQuote(req.params.id);
+    res.status(201).json(quote);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Quote not found') {
+      res.status(404).json({ error: 'Quote not found' });
+      return;
+    }
+    console.error('Duplicate quote error:', error);
+    res.status(500).json({ error: 'Failed to duplicate quote' });
   }
 });
 
@@ -767,5 +1116,191 @@ router.get('/promotion-codes/validate/:code', async (req: AuthenticatedRequest, 
     res.status(500).json({ error: 'Failed to validate promotion code' });
   }
 });
+
+// ============================================================================
+// FILE UPLOAD & BUNDLE MANAGEMENT
+// ============================================================================
+
+// Upload a bundle file for a product
+router.post(
+  '/products/:id/upload',
+  upload.single('file'),
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      if (!storageService.isS3Configured()) {
+        res.status(400).json({ error: 'S3 storage is not configured' });
+        return;
+      }
+
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: 'No file uploaded' });
+        return;
+      }
+
+      // Get the product
+      const product = await productService.getProductById(req.params.id);
+      if (!product) {
+        res.status(404).json({ error: 'Product not found' });
+        return;
+      }
+
+      // Get version from body or use current product version
+      const version = req.body.version || product.version || undefined;
+
+      // Generate the S3 key
+      const key = storageService.generateProductFileKey(
+        product.category || 'products',
+        product.name,
+        file.originalname,
+        version
+      );
+
+      // Upload to S3
+      const result = await storageService.uploadFile(
+        key,
+        file.buffer,
+        file.mimetype
+      );
+
+      // Optionally set as active bundle if requested
+      if (req.body.setActive === 'true') {
+        await productService.updateProduct(req.params.id, {
+          s3PackageKey: key,
+          version: version || undefined,
+        });
+      }
+
+      res.status(201).json({
+        key: result.key,
+        size: result.size,
+        contentType: result.contentType,
+        filename: file.originalname,
+        setActive: req.body.setActive === 'true',
+      });
+    } catch (error) {
+      console.error('Upload bundle error:', error);
+      if (error instanceof Error && error.message.includes('File type not allowed')) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      res.status(500).json({ error: 'Failed to upload file' });
+    }
+  }
+);
+
+// List all bundles for a product
+router.get('/products/:id/bundles', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!storageService.isS3Configured()) {
+      res.json({ bundles: [], s3Configured: false });
+      return;
+    }
+
+    const product = await productService.getProductById(req.params.id);
+    if (!product) {
+      res.status(404).json({ error: 'Product not found' });
+      return;
+    }
+
+    // Get the prefix for this product's bundles
+    const prefix = storageService.getProductBundlePrefix(
+      product.category || 'products',
+      product.name
+    );
+
+    // List files in the prefix
+    const bundles = await storageService.listFiles(prefix);
+
+    // Mark the active bundle
+    const bundlesWithActive = bundles.map((bundle) => ({
+      ...bundle,
+      isActive: bundle.key === product.s3PackageKey,
+      sizeFormatted: formatFileSize(bundle.size),
+    }));
+
+    res.json({
+      bundles: bundlesWithActive,
+      activeKey: product.s3PackageKey,
+      s3Configured: true,
+    });
+  } catch (error) {
+    console.error('List bundles error:', error);
+    res.status(500).json({ error: 'Failed to list bundles' });
+  }
+});
+
+// Set active bundle for a product
+router.put('/products/:id/bundle', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const setBundleSchema = z.object({
+      s3PackageKey: z.string().min(1),
+      version: z.string().optional(),
+    });
+
+    const data = setBundleSchema.parse(req.body);
+
+    // Verify the file exists
+    const exists = await storageService.checkFileExists(data.s3PackageKey);
+    if (!exists) {
+      res.status(400).json({ error: 'Bundle file does not exist in storage' });
+      return;
+    }
+
+    // Update the product
+    const product = await productService.updateProduct(req.params.id, {
+      s3PackageKey: data.s3PackageKey,
+      version: data.version,
+    });
+
+    res.json(product);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    console.error('Set bundle error:', error);
+    res.status(500).json({ error: 'Failed to set active bundle' });
+  }
+});
+
+// Delete a bundle file
+router.delete('/products/:id/bundles/:key(*)', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const product = await productService.getProductById(req.params.id);
+    if (!product) {
+      res.status(404).json({ error: 'Product not found' });
+      return;
+    }
+
+    const key = req.params.key;
+
+    // Don't allow deleting the active bundle
+    if (key === product.s3PackageKey) {
+      res.status(400).json({ error: 'Cannot delete the active bundle. Set a different active bundle first.' });
+      return;
+    }
+
+    const deleted = await storageService.deleteFile(key);
+    if (!deleted) {
+      res.status(500).json({ error: 'Failed to delete bundle' });
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Delete bundle error:', error);
+    res.status(500).json({ error: 'Failed to delete bundle' });
+  }
+});
+
+// Helper function to format file size
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
 
 export default router;

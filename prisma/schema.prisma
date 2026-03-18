@@ -37,6 +37,27 @@ enum PurchaseType {
   ONE_TIME
 }
 
+enum LicenseType {
+  INDIVIDUAL    // Single user license
+  TEAM          // Team license (5-50 seats)
+  ENTERPRISE    // Enterprise/unlimited license
+  PLUGIN        // Add-on plugin license
+  TRIAL         // Time-limited trial
+}
+
+enum LicenseTerm {
+  SUBSCRIPTION  // Monthly/Annual recurring
+  PERPETUAL     // One-time purchase
+  MULTI_YEAR    // 2-3 year terms
+}
+
+enum Platform {
+  WEB
+  WINDOWS
+  MACOS
+  LINUX
+}
+
 model Product {
   id                   String         @id @default(uuid())
   name                 String
@@ -57,9 +78,30 @@ model Product {
   createdAt            DateTime       @default(now()) @map("created_at")
   updatedAt            DateTime       @updatedAt @map("updated_at")
 
+  // Platform targeting
+  platforms            Platform[]     @default([WEB])
+  requiresActivation   Boolean        @default(true) @map("requires_activation")
+
+  // Seat configuration for team products
+  defaultSeatCount     Int            @default(1) @map("default_seat_count")
+  maxSeatCount         Int?           @map("max_seat_count")
+  seatPriceMonthly     Int?           @map("seat_price_monthly")    // Per-seat price in cents
+  seatPriceAnnual      Int?           @map("seat_price_annual")     // Per-seat price in cents
+
+  // Desktop app configuration
+  offlineGraceDays     Int            @default(7) @map("offline_grace_days")
+  checkInIntervalDays  Int            @default(7) @map("check_in_interval_days")
+
+  // Product relationships (for plugins/add-ons)
+  parentProductId      String?        @map("parent_product_id")
+  parentProduct        Product?       @relation("ProductAddons", fields: [parentProductId], references: [id])
+  addons               Product[]      @relation("ProductAddons")
+
   licenses License[]
+  quotes   Quote[]
 
   @@index([category])
+  @@index([parentProductId])
   @@map("products")
 }
 
@@ -77,6 +119,7 @@ model Customer {
   subscriptions       Subscription[]
   refunds             Refund[]
   passwordResetTokens PasswordResetToken[]
+  quotes              Quote[]
 
   @@map("customers")
 }
@@ -95,13 +138,34 @@ model License {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  product     Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
-  activations LicenseActivation[]
+  // Seat-based licensing
+  licenseType        LicenseType   @default(INDIVIDUAL) @map("license_type")
+  seatCount          Int           @default(1) @map("seat_count")
+  seatsUsed          Int           @default(0) @map("seats_used")
+
+  // Volume/Enterprise licensing
+  isVolumeLicense    Boolean       @default(false) @map("is_volume_license")
+  volumeDiscount     Decimal?      @db.Decimal(5, 2) @map("volume_discount")
+
+  // License terms
+  licenseTerm        LicenseTerm   @default(SUBSCRIPTION) @map("license_term")
+  renewalDate        DateTime?     @map("renewal_date")
+
+  // Parent license for seat assignments (organization master license)
+  parentLicenseId    String?       @map("parent_license_id")
+  parentLicense      License?      @relation("SeatHierarchy", fields: [parentLicenseId], references: [id])
+  childLicenses      License[]     @relation("SeatHierarchy")
+
+  customer        Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product         Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  activations     LicenseActivation[]
+  seatAssignments SeatAssignment[]
 
   @@index([customerId])
   @@index([productId])
   @@index([status])
+  @@index([licenseType])
+  @@index([parentLicenseId])
   @@map("licenses")
 }
 
@@ -132,11 +196,55 @@ model LicenseActivation {
   activatedAt        DateTime @default(now()) @map("activated_at")
   lastSeenAt         DateTime @default(now()) @map("last_seen_at")
 
+  // Desktop app tracking
+  platform           Platform? @map("platform")
+  appVersion         String?   @map("app_version")
+  osVersion          String?   @map("os_version")
+
+  // Offline token management
+  offlineToken       String?   @map("offline_token")
+  offlineTokenExpiry DateTime? @map("offline_token_expiry")
+  lastCheckIn        DateTime? @map("last_check_in")
+
   license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
 
   @@unique([licenseId, machineFingerprint])
   @@index([licenseId])
+  @@index([platform])
   @@map("license_activations")
+}
+
+// Seat assignment for team/enterprise licenses
+model SeatAssignment {
+  id                 String    @id @default(uuid())
+  licenseId          String    @map("license_id")
+
+  // Assigned user
+  email              String
+  name               String?
+
+  // Assignment tracking
+  assignedAt         DateTime  @default(now()) @map("assigned_at")
+  assignedBy         String?   @map("assigned_by")
+
+  // Invite tracking
+  inviteToken        String?   @unique @map("invite_token")
+  inviteSentAt       DateTime? @map("invite_sent_at")
+  inviteAcceptedAt   DateTime? @map("invite_accepted_at")
+
+  // Activation tracking
+  activated          Boolean   @default(false)
+  activatedAt        DateTime? @map("activated_at")
+  machineFingerprint String?   @map("machine_fingerprint")
+  machineName        String?   @map("machine_name")
+
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@unique([licenseId, email])
+  @@index([licenseId])
+  @@index([email])
+  @@index([inviteToken])
+  @@map("seat_assignments")
 }
 
 // Usage-based billing records
@@ -193,4 +301,60 @@ model PasswordResetToken {
   @@index([customerId])
   @@index([token])
   @@map("password_reset_tokens")
+}
+
+// Enterprise quotes for POA pricing
+model Quote {
+  id              String    @id @default(uuid())
+  quoteNumber     String    @unique @map("quote_number")
+  customerId      String?   @map("customer_id")
+  productId       String    @map("product_id")
+
+  // Contact info (for new prospects)
+  contactEmail    String    @map("contact_email")
+  contactName     String?   @map("contact_name")
+  companyName     String?   @map("company_name")
+
+  // Quote details
+  seatCount       Int       @map("seat_count")
+  term            LicenseTerm @default(SUBSCRIPTION)
+  termYears       Int       @default(1) @map("term_years")
+
+  // Pricing
+  basePrice       Int       @map("base_price")      // In cents
+  discount        Decimal?  @db.Decimal(5, 2)       // e.g., 0.25 = 25% off
+  finalPrice      Int       @map("final_price")     // In cents
+  currency        String    @default("usd")
+
+  // Custom requirements
+  customFeatures  String[]  @default([]) @map("custom_features")
+  notes           String?
+
+  // Status
+  status          QuoteStatus @default(DRAFT)
+  validUntil      DateTime  @map("valid_until")
+  acceptedAt      DateTime? @map("accepted_at")
+  convertedLicenseId String? @unique @map("converted_license_id")
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  customer        Customer? @relation(fields: [customerId], references: [id])
+  product         Product   @relation(fields: [productId], references: [id])
+
+  @@index([customerId])
+  @@index([productId])
+  @@index([status])
+  @@map("quotes")
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CONVERTED
 }

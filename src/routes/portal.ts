@@ -8,6 +8,7 @@ import * as paymentService from '../services/payment.service.js';
 import * as storageService from '../services/storage.service.js';
 import * as productService from '../services/product.service.js';
 import * as captchaService from '../services/captcha.service.js';
+import * as seatService from '../services/seat.service.js';
 import { passwordSchema, getPasswordRequirementsText } from '../utils/password.js';
 import { JWTAuthProvider } from '../auth/jwt.auth.js';
 import { logger } from '../services/logger.service.js';
@@ -578,6 +579,160 @@ router.get('/refunds', authenticate, async (req: AuthenticatedRequest, res: Resp
   } catch (error) {
     console.error('Get refunds error:', error);
     res.status(500).json({ error: 'Failed to get refunds' });
+  }
+});
+
+// ============================================================================
+// SEAT INVITE ROUTES (PUBLIC)
+// ============================================================================
+
+// Verify a seat invite token (check if valid before showing acceptance form)
+router.get('/invite/:token', async (req, res: Response) => {
+  try {
+    const { prisma } = await import('../config/database.js');
+
+    const assignment = await prisma.seatAssignment.findUnique({
+      where: { inviteToken: req.params.token },
+      include: {
+        license: {
+          include: {
+            product: { select: { id: true, name: true, features: true } },
+            customer: { select: { email: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!assignment) {
+      res.status(404).json({ valid: false, error: 'Invalid or expired invite' });
+      return;
+    }
+
+    if (assignment.inviteAcceptedAt) {
+      res.status(400).json({ valid: false, error: 'Invite has already been accepted' });
+      return;
+    }
+
+    res.json({
+      valid: true,
+      email: assignment.email,
+      name: assignment.name,
+      product: assignment.license.product.name,
+      features: assignment.license.product.features,
+      assignedBy: assignment.license.customer.name || assignment.license.customer.email,
+    });
+  } catch (error) {
+    console.error('Verify invite error:', error);
+    res.status(500).json({ valid: false, error: 'Failed to verify invite' });
+  }
+});
+
+// Accept a seat invite
+const acceptInviteSchema = z.object({
+  password: passwordSchema,
+  name: z.string().max(100).optional(),
+  machineFingerprint: z.string().optional(),
+  machineName: z.string().optional(),
+});
+
+router.post('/invite/:token/accept', authRateLimit, async (req, res: Response) => {
+  try {
+    const { prisma } = await import('../config/database.js');
+    const data = acceptInviteSchema.parse(req.body);
+
+    // Get the assignment
+    const assignment = await prisma.seatAssignment.findUnique({
+      where: { inviteToken: req.params.token },
+      include: {
+        license: {
+          include: {
+            product: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!assignment) {
+      res.status(404).json({ success: false, error: 'Invalid or expired invite' });
+      return;
+    }
+
+    if (assignment.inviteAcceptedAt) {
+      res.status(400).json({ success: false, error: 'Invite has already been accepted' });
+      return;
+    }
+
+    // Check if customer exists
+    const existingCustomer = await customerService.getCustomerByEmail(assignment.email);
+
+    if (!existingCustomer) {
+      // Create new customer
+      await customerService.createCustomer({
+        email: assignment.email,
+        password: data.password,
+        name: data.name || assignment.name || undefined,
+      });
+    }
+
+    // Accept the seat invite
+    const result = await seatService.acceptSeatInvite(
+      req.params.token,
+      data.machineFingerprint,
+      data.machineName
+    );
+
+    if (!result.success) {
+      res.status(400).json({ success: false, error: result.error });
+      return;
+    }
+
+    // Authenticate the customer
+    const auth = await customerService.authenticateCustomer(assignment.email, data.password);
+
+    if (auth) {
+      // Set auth cookie
+      const authProvider = getAuthProvider();
+      if (authProvider instanceof JWTAuthProvider) {
+        authProvider.setAuthCookie(res, auth.token);
+      }
+    }
+
+    res.json({
+      success: true,
+      customer: auth?.customer,
+      token: auth?.token,
+      product: assignment.license.product.name,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ success: false, error: 'Validation error', details: error.errors });
+      return;
+    }
+    if (error instanceof Error && error.message.includes('already exists')) {
+      res.status(400).json({
+        success: false,
+        error: 'An account with this email already exists. Please log in to accept this invite.',
+      });
+      return;
+    }
+    console.error('Accept invite error:', error);
+    res.status(500).json({ success: false, error: 'Failed to accept invite' });
+  }
+});
+
+// Get my seat assignments (authenticated)
+router.get('/seats', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const seats = await seatService.getSeatsByEmail(req.user.email);
+    res.json(seats);
+  } catch (error) {
+    console.error('Get seats error:', error);
+    res.status(500).json({ error: 'Failed to get seat assignments' });
   }
 });
 
