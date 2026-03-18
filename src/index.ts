@@ -26,11 +26,11 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://js.hcaptcha.com", "https://hcaptcha.com"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https://checkout.stripe.com", "https://api.stripe.com"],
-      frameSrc: ["'self'", "https://checkout.stripe.com", "https://js.stripe.com"],
+      connectSrc: ["'self'", "https://checkout.stripe.com", "https://api.stripe.com", "https://hcaptcha.com", "https://*.hcaptcha.com"],
+      frameSrc: ["'self'", "https://checkout.stripe.com", "https://js.stripe.com", "https://hcaptcha.com", "https://*.hcaptcha.com"],
     },
   },
 }));

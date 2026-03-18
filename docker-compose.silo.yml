@@ -1,0 +1,121 @@
+name: license-server-silo
+
+services:
+  # Existing PostgreSQL - connect to silo-lab network
+  postgres:
+    image: postgres:16-alpine
+    container_name: license_server_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: license_server
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - default
+      - silo-lab
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # License Server App - connected to silo-lab
+  app:
+    build: .
+    container_name: license-server
+    restart: unless-stopped
+    environment:
+      # Database - existing container
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/license_server
+
+      # Server
+      PORT: 3000
+      NODE_ENV: production
+
+      # JWT Auth
+      JWT_SECRET: ${JWT_SECRET:-license-server-jwt-secret-2026}
+      JWT_EXPIRES_IN: 7d
+      AUTH_PROVIDER: jwt
+
+      # S3/Storage - use silo-storage
+      S3_ENDPOINT: http://silo-storage:9000
+      S3_FORCE_PATH_STYLE: "true"
+      S3_BUCKET_NAME: license-server-downloads
+      AWS_ACCESS_KEY_ID: silo-admin
+      AWS_SECRET_ACCESS_KEY: silo-secret-key
+      AWS_REGION: us-east-1
+      S3_DOWNLOAD_EXPIRY_HOURS: "4"
+
+      # Redis - disabled for now (silo-redis on different network)
+      # REDIS_URL: redis://172.30.0.15:6379/6
+
+      # CORS
+      CORS_ORIGINS: https://licencing.agencio.cloud,http://localhost:3000
+
+      # Stripe (from .env)
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      STRIPE_SUCCESS_URL: https://licencing.agencio.cloud/success
+      STRIPE_CANCEL_URL: https://licencing.agencio.cloud/cancel
+
+      # Email (optional - from .env if configured)
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      # EMAIL_SENDER: Set in .env if email is configured
+
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    expose:
+      - "3000"
+    ports:
+      - "3000:3000"  # Also expose locally for development
+    networks:
+      default:
+      silo-lab:
+        ipv4_address: 172.30.0.50
+    dns:
+      - 172.30.0.2   # silo-dns
+      - 8.8.8.8
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Initialize bucket in silo-storage
+  storage-init:
+    image: minio/mc:latest
+    container_name: license-server-storage-init
+    entrypoint: >
+      /bin/sh -c "
+        sleep 5
+        mc alias set silo http://silo-storage:9000 silo-admin silo-secret-key
+        mc mb silo/license-server-downloads --ignore-existing
+        mc anonymous set download silo/license-server-downloads
+        echo 'Storage bucket initialized'
+      "
+    networks:
+      - silo-lab
+    restart: "no"
+    depends_on:
+      - app
+
+networks:
+  default:
+    driver: bridge
+  silo-lab:
+    external: true
+    name: silo-lab
+
+volumes:
+  postgres_data:

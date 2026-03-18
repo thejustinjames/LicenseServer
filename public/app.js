@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', function() {
       openAuthModal('login');
     } else {
       loadCategories();
-      loadProducts();
+      // Don't load products until category is selected
     }
   });
 });
@@ -141,7 +141,18 @@ function bindEvents() {
   });
 
   document.getElementById('heroSignupBtn').addEventListener('click', function() {
-    openAuthModal('register');
+    if (user) {
+      // User is logged in - scroll to products and highlight dropdown
+      var categorySelect = document.getElementById('categorySelect');
+      categorySelect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      categorySelect.focus();
+      categorySelect.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.3)';
+      setTimeout(function() {
+        categorySelect.style.boxShadow = '';
+      }, 2000);
+    } else {
+      openAuthModal('register');
+    }
   });
 
   // Modal close button
@@ -248,7 +259,15 @@ function bindEvents() {
     }, 300);
   });
   document.getElementById('categorySelect').addEventListener('change', function() {
-    loadProducts();
+    var category = this.value;
+    var searchInput = document.getElementById('productSearchInput');
+    if (category) {
+      searchInput.style.display = 'block';
+      loadProducts();
+    } else {
+      searchInput.style.display = 'none';
+      showProductPlaceholder();
+    }
   });
 }
 
@@ -344,11 +363,17 @@ function updateAuthUI() {
   var userNav = document.getElementById('userNav');
   var userEmail = document.getElementById('userEmail');
   var adminLink = document.getElementById('adminLink');
+  var heroBtn = document.getElementById('heroSignupBtn');
 
   if (user) {
     authNav.classList.add('hidden');
     userNav.classList.remove('hidden');
     userEmail.textContent = user.email;
+
+    // Update hero button for logged in users
+    if (heroBtn) {
+      heroBtn.textContent = 'Select a Product';
+    }
 
     // Show admin link for admin users
     if (user.isAdmin) {
@@ -360,6 +385,11 @@ function updateAuthUI() {
     authNav.classList.remove('hidden');
     userNav.classList.add('hidden');
     adminLink.classList.add('hidden');
+
+    // Reset hero button for logged out users
+    if (heroBtn) {
+      heroBtn.textContent = 'Get Started';
+    }
   }
 }
 
@@ -406,12 +436,31 @@ function loadCategories() {
     });
 }
 
+// Show product placeholder (when no category selected)
+function showProductPlaceholder() {
+  var grid = document.getElementById('productsGrid');
+  grid.innerHTML = '<div class="product-placeholder" style="text-align: center; padding: 3rem; color: #64748b;">' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 1rem; opacity: 0.5;">' +
+    '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>' +
+    '<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>' +
+    '<line x1="12" y1="22.08" x2="12" y2="12"></line>' +
+    '</svg>' +
+    '<p style="font-size: 1.1rem;">Select a product from the dropdown above to view available plans and pricing.</p>' +
+    '</div>';
+}
+
 // Load Products
 function loadProducts() {
   console.log('Loading products...');
 
   var search = document.getElementById('productSearchInput').value;
   var category = document.getElementById('categorySelect').value;
+
+  // Don't load if no category selected
+  if (!category) {
+    showProductPlaceholder();
+    return;
+  }
 
   var url = '/api/portal/products';
   var params = [];
@@ -503,7 +552,6 @@ function handleLogin(event) {
 
     // Load data now that user is authenticated
     loadCategories();
-    loadProducts();
     showSection('home');
   })
   .catch(function(error) {
@@ -550,7 +598,6 @@ function handleRegister(event) {
 
     // Load data now that user is authenticated
     loadCategories();
-    loadProducts();
     showSection('home');
   })
   .catch(function(error) {

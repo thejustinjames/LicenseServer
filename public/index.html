@@ -40,24 +40,28 @@
     <section id="home" class="section active">
       <div class="hero">
         <h1>Software Licensing Made Simple</h1>
-        <p>Manage your software licenses with ease. Secure, scalable, and developer-friendly.</p>
+        <p>Manage your software licenses with ease. Secure and scalable.</p>
         <button class="btn btn-primary" id="heroSignupBtn" style="background: white; color: #2563eb; padding: 0.8rem 2rem; font-size: 1.1rem;">Get Started</button>
       </div>
 
       <h2 style="margin-bottom: 0.5rem; color: #1e293b;">Available Products</h2>
-      <p style="color: #64748b; margin-bottom: 1rem;">Choose a plan that fits your needs</p>
+      <p style="color: #64748b; margin-bottom: 1rem;">Pay securely via Stripe, get your license key, and download your product</p>
 
       <div class="products-filter">
-        <input type="text" id="productSearchInput" placeholder="Search products..." class="search-input">
-        <select id="categorySelect" class="category-select">
-          <option value="">All Categories</option>
+        <select id="categorySelect" class="category-select" style="min-width: 250px;">
+          <option value="">-- Select a Product --</option>
         </select>
+        <input type="text" id="productSearchInput" placeholder="Search products..." class="search-input" style="display: none;">
       </div>
 
       <div id="productsGrid" class="products-grid">
-        <div class="loading">
-          <div class="spinner"></div>
-          Loading products...
+        <div class="product-placeholder" style="text-align: center; padding: 3rem; color: #64748b;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 1rem; opacity: 0.5;">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
+          <p style="font-size: 1.1rem;">Select a product from the dropdown above to view available plans and pricing.</p>
         </div>
       </div>
     </section>

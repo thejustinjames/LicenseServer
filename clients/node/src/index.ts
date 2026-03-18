@@ -123,7 +123,7 @@ export class LicenseClient {
         }),
       });
 
-      const result: ValidationResult = await response.json();
+      const result = (await response.json()) as ValidationResult;
 
       if (result.valid) {
         this.cacheValidation(licenseKey, result);
@@ -159,7 +159,7 @@ export class LicenseClient {
         }),
       });
 
-      const result: ActivationResult = await response.json();
+      const result = (await response.json()) as ActivationResult;
 
       if (result.success) {
         // Validate and cache after activation
@@ -189,7 +189,7 @@ export class LicenseClient {
         }),
       });
 
-      const result = await response.json();
+      const result = (await response.json()) as { success: boolean; error?: string };
 
       if (result.success) {
         this.clearCache(licenseKey);
