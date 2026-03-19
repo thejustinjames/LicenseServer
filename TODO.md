@@ -51,6 +51,19 @@
 See [COMPLETED.md](./COMPLETED.md) for full details on implemented features.
 
 ### Recently Completed
+- [x] **Silo-Lab Integration & Product Tiers (2026-03-18)**
+  - [x] k8inspector product tiers (Free, Pro, Enterprise, Custom, Source)
+  - [x] SILO product tiers (Home, Business, Enterprise, Packs, Custom)
+  - [x] SILO add-ons (k8inspector Integration, Docker Monitor) - annual only
+  - [x] Enterprise Pack pricing: Server $5,000/year + $45/license/year
+  - [x] Docker silo-lab integration (`docker-compose.silo.yml`)
+  - [x] Nginx reverse proxy config for `licencing.agencio.cloud`
+  - [x] DNS configuration for agencio.cloud domain
+  - [x] Stripe sandbox sync for all products with SGD pricing
+  - [x] Bundle upload/management in admin panel (drag-and-drop)
+  - [x] S3/MinIO storage integration for software bundles
+  - [x] Fixed frontend pricing display (was hardcoded $9.99)
+  - [x] Promo codes enabled in Stripe checkout
 - [x] **Extended Stripe Integration (2026-03-17)**
   - [x] One-time payments for perpetual licenses
   - [x] Monthly/Annual billing intervals

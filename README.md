@@ -15,6 +15,7 @@ A Lemon Squeezy-style license server with Stripe payments, license key managemen
 - **Monthly/Annual Billing**: Support for different billing intervals
 - **Customer Portal**: Self-service license management and downloads
 - **Admin Dashboard**: Full product, license, and coupon management UI (`/admin.html`)
+- **Bundle Management**: Upload, manage, and distribute software packages via S3/MinIO
 - **Product Categories**: Organize products with categories, search, and filtering
 - **Admin API**: Full product, license, and coupon CRUD operations
 - **S3 Downloads**: Signed URLs for secure software distribution (4-hour expiry)
@@ -23,6 +24,7 @@ A Lemon Squeezy-style license server with Stripe payments, license key managemen
 - **Email Notifications**: Microsoft Graph / Office 365 integration
 - **Rate Limiting**: Protection against brute-force attacks
 - **Security Hardened**: httpOnly cookies, token revocation, Redis rate limiting
+- **Silo-Lab Integration**: Docker deployment with nginx reverse proxy and DNS
 
 ## Tech Stack
 
@@ -240,6 +242,14 @@ GET /api/admin/customers/:id  # Get customer
 GET /api/admin/dashboard/stats  # Get statistics
 ```
 
+#### Bundle Management
+```http
+POST   /api/admin/products/:id/upload      # Upload bundle file (multipart/form-data)
+GET    /api/admin/products/:id/bundles     # List all bundles for product
+PUT    /api/admin/products/:id/bundle      # Set active bundle (s3Key in body)
+DELETE /api/admin/products/:id/bundles/:key # Delete bundle file
+```
+
 ### Webhooks
 
 ```http
@@ -311,7 +321,7 @@ See [`clients/README.md`](clients/README.md) for full documentation.
 │   ├── index.ts              # Express app entry
 │   ├── config/               # Configuration
 │   ├── routes/               # API routes
-│   ├── services/             # Business logic
+│   ├── services/             # Business logic (incl. storage.service.ts)
 │   ├── middleware/           # Auth & rate limiting
 │   ├── utils/                # Helpers
 │   └── types/                # TypeScript types
@@ -328,11 +338,15 @@ See [`clients/README.md`](clients/README.md) for full documentation.
 │   ├── csharp/               # C# SDK (Windows)
 │   └── rust/                 # Rust SDK (cross-platform)
 ├── prisma/
-│   └── schema.prisma         # Database schema
+│   ├── schema.prisma         # Database schema
+│   ├── seed-k8inspector.ts   # k8inspector product seeding
+│   ├── seed-silo.ts          # SILO product seeding
+│   └── sync-stripe.ts        # Stripe product sync
 ├── keys/                     # RSA keys for offline licensing
 ├── k8s/                      # Kubernetes manifests
 ├── docs/                     # Documentation
-├── docker-compose.yml
+├── docker-compose.yml        # Standard deployment
+├── docker-compose.silo.yml   # Silo-lab integration
 ├── Dockerfile
 └── package.json
 ```
@@ -340,16 +354,20 @@ See [`clients/README.md`](clients/README.md) for full documentation.
 ## Scripts
 
 ```bash
-npm run dev          # Start development server with hot reload
-npm run build        # Build for production
-npm run start        # Start production server
-npm run db:generate  # Generate Prisma client
-npm run db:migrate   # Run migrations
-npm run db:push      # Push schema to database
-npm run db:studio    # Open Prisma Studio
-npm test             # Run unit tests
-npm run test:watch   # Run tests in watch mode
-npm run test:coverage # Run tests with coverage report
+npm run dev            # Start development server with hot reload
+npm run build          # Build for production
+npm run start          # Start production server
+npm run db:generate    # Generate Prisma client
+npm run db:migrate     # Run migrations
+npm run db:push        # Push schema to database
+npm run db:studio      # Open Prisma Studio
+npm run seed:k8inspector # Seed k8inspector products
+npm run seed:silo      # Seed SILO products
+npm run seed:all       # Seed all products
+npm run sync:stripe    # Sync products to Stripe
+npm test               # Run unit tests
+npm run test:watch     # Run tests in watch mode
+npm run test:coverage  # Run tests with coverage report
 ```
 
 ## Docker Deployment
@@ -361,6 +379,57 @@ docker-compose up -d
 # Or build the image separately
 docker build -t license-server .
 ```
+
+### Silo-Lab Deployment
+
+For integration with silo-lab infrastructure at `licencing.agencio.cloud`:
+
+```bash
+# Start with silo-lab network integration
+docker-compose -f docker-compose.silo.yml up -d
+
+# Run database migrations
+docker exec license-server npx prisma db push
+
+# Seed products
+docker exec license-server npm run seed:k8inspector
+docker exec license-server npm run seed:silo
+```
+
+This connects to:
+- **silo-nginx** (172.30.0.5) - SSL termination at `https://licencing.agencio.cloud`
+- **silo-storage** (172.30.0.12) - MinIO for software bundles
+- **silo-redis** (172.30.0.15) - Rate limiting and token blacklist
+- **silo-dns** (172.30.0.2) - Internal DNS resolution
+
+## Product Tiers
+
+### k8inspector
+| Tier | Price | Features |
+|------|-------|----------|
+| Free | SGD 0/month | Basic inspection, CLI access, 30-day license |
+| Professional | SGD 79/month or SGD 790/year | Advanced inspection, API access, offline mode |
+| Enterprise | SGD 199/month or SGD 1,990/year | SSO, audit logs, team management |
+| Enterprise Custom | POA | Custom integration, on-premise, SLA |
+| Enterprise Source | POA | Source code access, white-label |
+
+### SILO
+| Tier | Price | Features |
+|------|-------|----------|
+| Home (Windows/macOS) | SGD 99 one-time | 1-year license, 1 machine, basic modules |
+| Business | SGD 199/month or SGD 1,990/year | 5 machines, all modules, priority support |
+| Enterprise | SGD 499/month or SGD 4,990/year | Unlimited machines, SSO, dedicated support |
+| Enterprise Pack 5 | SGD 5,225/year | Server + 5 seat licenses |
+| Enterprise Pack 10 | SGD 5,450/year | Server + 10 seat licenses |
+| Enterprise Pack 20 | SGD 5,900/year | Server + 20 seat licenses |
+| Enterprise Pack 50 | SGD 7,250/year | Server + 50 seat licenses |
+| Enterprise Custom | POA | On-premise, air-gapped, white-label |
+
+### SILO Add-ons (Annual Only)
+| Add-on | Price | Features |
+|--------|-------|----------|
+| k8inspector Integration | SGD 490/year | Kubernetes inspection for SILO |
+| Docker Monitor | SGD 290/year | Container monitoring and security |
 
 ## Security Considerations
 

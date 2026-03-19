@@ -266,6 +266,22 @@ main {
   font-weight: normal;
 }
 
+.product-pricing {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.product-price-annual {
+  font-size: 0.95rem;
+  color: #64748b;
+  margin-bottom: 1rem;
+}
+
+.product-price-annual small {
+  color: #94a3b8;
+}
+
 /* Auth Forms */
 .auth-container {
   max-width: 400px;

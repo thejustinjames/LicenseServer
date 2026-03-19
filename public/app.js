@@ -493,11 +493,48 @@ function loadProducts() {
           html += '<li>' + escapeHtml(features[j].replace(/-/g, ' ')) + '</li>';
         }
         html += '</ul>';
-        if (product.hasStripePrice) {
-          html += '<div class="product-price">$9.99<span>/month</span></div>';
-          html += '<button class="btn btn-success checkout-btn" data-product-id="' + product.id + '" style="width: 100%;">Subscribe Now</button>';
+
+        // Display pricing based on product type
+        if (product.priceMonthly !== null || product.priceAnnual !== null) {
+          html += '<div class="product-pricing">';
+
+          if (product.priceMonthly === 0) {
+            // Free product
+            html += '<div class="product-price">Free</div>';
+            html += '<button class="btn btn-success checkout-btn" data-product-id="' + product.id + '" style="width: 100%;">Get Started</button>';
+          } else if (product.purchaseType === 'ONE_TIME') {
+            // One-time purchase
+            var price = product.priceMonthly ? (product.priceMonthly / 100).toFixed(0) : (product.priceAnnual / 100).toFixed(0);
+            html += '<div class="product-price">SGD ' + price + '</div>';
+            if (product.hasStripePrice) {
+              html += '<button class="btn btn-success checkout-btn" data-product-id="' + product.id + '" style="width: 100%;">Buy Now</button>';
+            }
+          } else if (product.priceMonthly && product.priceMonthly > 0) {
+            // Subscription with monthly pricing
+            html += '<div class="product-price">SGD ' + (product.priceMonthly / 100).toFixed(0) + '<span>/month</span></div>';
+            if (product.priceAnnual) {
+              var annualPrice = (product.priceAnnual / 100).toLocaleString();
+              var monthlyEquiv = Math.round(product.priceAnnual / 100 / 12);
+              html += '<div class="product-price-annual">or SGD ' + annualPrice + '/year <small>(~SGD ' + monthlyEquiv + '/mo)</small></div>';
+            }
+            if (product.hasStripePrice) {
+              html += '<button class="btn btn-success checkout-btn" data-product-id="' + product.id + '" style="width: 100%;">Subscribe Now</button>';
+            }
+          } else if (product.priceAnnual) {
+            // Annual-only subscription (Enterprise Packs)
+            var annualPrice = (product.priceAnnual / 100).toLocaleString();
+            html += '<div class="product-price">SGD ' + annualPrice + '<span>/year</span></div>';
+            if (product.hasStripePrice || product.hasAnnualPrice) {
+              html += '<button class="btn btn-success checkout-btn" data-product-id="' + product.id + '" data-billing="annual" style="width: 100%;">Subscribe Annually</button>';
+            }
+          }
+          html += '</div>';
         } else {
-          html += '<p style="color: #64748b; font-style: italic;">Pricing not configured</p>';
+          // POA - Contact sales
+          html += '<div class="product-pricing">';
+          html += '<div class="product-price" style="font-size: 1rem;">Contact Sales</div>';
+          html += '<button class="btn btn-secondary" onclick="window.location.href=\'mailto:sales@agencio.cloud\'" style="width: 100%;">Request Quote</button>';
+          html += '</div>';
         }
         html += '</div>';
       }

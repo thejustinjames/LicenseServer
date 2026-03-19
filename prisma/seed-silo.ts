@@ -78,60 +78,60 @@ const siloProducts: SiloProduct[] = [
     s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
     version: '1.0.0',
   },
-  // Enterprise License Packs - Annual bundles
+  // Enterprise License Packs - Annual bundles (Server $5,000 + $45/license/year)
   {
     name: 'SILO Enterprise Pack - 5 Licenses',
-    description: 'Enterprise license bundle for 5 users. Annual subscription with volume discount.',
+    description: 'Enterprise license bundle for 5 users. Includes server license and 5 seat licenses.',
     category: 'silo',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'HYBRID',
     priceMonthly: null,
-    priceAnnual: 2250000,     // SGD 22,500/year ($4,500 per license - 10% discount)
+    priceAnnual: 522500,      // SGD 5,225/year ($5,000 server + 5 × $45 licenses)
     licenseDurationDays: null,
-    features: ['5-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'priority-support', 'volume-discount'],
+    features: ['5-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'priority-support'],
     s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
     version: '1.0.0',
   },
   {
     name: 'SILO Enterprise Pack - 10 Licenses',
-    description: 'Enterprise license bundle for 10 users. Annual subscription with volume discount.',
+    description: 'Enterprise license bundle for 10 users. Includes server license and 10 seat licenses.',
     category: 'silo',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'HYBRID',
     priceMonthly: null,
-    priceAnnual: 4000000,     // SGD 40,000/year ($4,000 per license - 20% discount)
+    priceAnnual: 545000,      // SGD 5,450/year ($5,000 server + 10 × $45 licenses)
     licenseDurationDays: null,
-    features: ['10-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support', 'volume-discount'],
+    features: ['10-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support'],
     s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
     version: '1.0.0',
   },
   {
     name: 'SILO Enterprise Pack - 20 Licenses',
-    description: 'Enterprise license bundle for 20 users. Annual subscription with volume discount.',
+    description: 'Enterprise license bundle for 20 users. Includes server license and 20 seat licenses.',
     category: 'silo',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'HYBRID',
     priceMonthly: null,
-    priceAnnual: 7000000,     // SGD 70,000/year ($3,500 per license - 30% discount)
+    priceAnnual: 590000,      // SGD 5,900/year ($5,000 server + 20 × $45 licenses)
     licenseDurationDays: null,
-    features: ['20-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support', 'custom-integrations', 'volume-discount'],
+    features: ['20-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support', 'custom-integrations'],
     s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
     version: '1.0.0',
   },
   {
     name: 'SILO Enterprise Pack - 50 Licenses',
-    description: 'Enterprise license bundle for 50 users. Annual subscription with maximum volume discount.',
+    description: 'Enterprise license bundle for 50 users. Includes server license and 50 seat licenses.',
     category: 'silo',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'HYBRID',
     priceMonthly: null,
-    priceAnnual: 15000000,    // SGD 150,000/year ($3,000 per license - 40% discount)
+    priceAnnual: 725000,      // SGD 7,250/year ($5,000 server + 50 × $45 licenses)
     licenseDurationDays: null,
-    features: ['50-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support', 'custom-integrations', 'sla', 'volume-discount'],
+    features: ['50-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support', 'custom-integrations', 'sla'],
     s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
     version: '1.0.0',
   },
@@ -150,7 +150,7 @@ const siloProducts: SiloProduct[] = [
     s3PackageKey: null,
     version: null,
   },
-  // Add-on: SILO k8inspector Integration
+  // Add-on: SILO k8inspector Integration (Annual only)
   {
     name: 'SILO k8inspector Integration',
     description: 'Add Kubernetes inspection capabilities to SILO. Requires SILO Business or Enterprise license.',
@@ -158,14 +158,14 @@ const siloProducts: SiloProduct[] = [
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'ONLINE',
-    priceMonthly: 4900,       // SGD 49.00/month
-    priceAnnual: 49000,       // SGD 490.00/year (save ~17%)
+    priceMonthly: null,
+    priceAnnual: 49000,       // SGD 490.00/year
     licenseDurationDays: null,
     features: ['k8s-cluster-inspection', 'pod-analysis', 'network-policy-audit', 'rbac-review', 'secrets-scanning', 'compliance-checks', 'silo-integration'],
     s3PackageKey: 'silo/addons/silo-k8inspector-addon.zip',
     version: '1.0.0',
   },
-  // Add-on: SILO Docker Monitor
+  // Add-on: SILO Docker Monitor (Annual only)
   {
     name: 'SILO Docker Monitor',
     description: 'Real-time Docker container monitoring and security analysis for SILO. Requires SILO Business or Enterprise license.',
@@ -173,8 +173,8 @@ const siloProducts: SiloProduct[] = [
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'ONLINE',
-    priceMonthly: 2900,       // SGD 29.00/month
-    priceAnnual: 29000,       // SGD 290.00/year (save ~17%)
+    priceMonthly: null,
+    priceAnnual: 29000,       // SGD 290.00/year
     licenseDurationDays: null,
     features: ['container-monitoring', 'image-scanning', 'runtime-security', 'network-analysis', 'log-aggregation', 'alerting', 'silo-integration'],
     s3PackageKey: 'silo/addons/silo-docker-monitor-addon.zip',
