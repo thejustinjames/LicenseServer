@@ -37,9 +37,15 @@ export function generateLicenseKey(): string {
 }
 
 export function validateLicenseKeyFormat(key: string): boolean {
-  const pattern = /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
+  const pattern = /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
   if (!pattern.test(key)) {
     return false;
+  }
+
+  // Skip checksum validation for legacy keys (containing 0 or 1)
+  // These were created before the checksum system was implemented
+  if (key.includes('0') || key.includes('1')) {
+    return true;
   }
 
   const segments = key.split('-');

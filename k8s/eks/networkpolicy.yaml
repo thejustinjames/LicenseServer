@@ -1,0 +1,104 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: license-server-network-policy
+  namespace: preprod
+  labels:
+    app: license-server
+    component: licensing
+    part-of: agencio
+spec:
+  podSelector:
+    matchLabels:
+      app: license-server
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow from Kong API Gateway
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: preprod
+          podSelector:
+            matchLabels:
+              app: kong-gateway
+      ports:
+        - protocol: TCP
+          port: 3030
+
+    # Allow from other services in preprod namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: preprod
+      ports:
+        - protocol: TCP
+          port: 3030
+
+    # Allow from frontend namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: agencio-frontend
+      ports:
+        - protocol: TCP
+          port: 3030
+
+    # Allow health checks from kubelet
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 3030
+
+  egress:
+    # DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+
+    # PostgreSQL RDS
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # Redis ElastiCache
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 6379
+
+    # External HTTPS (Stripe, Cognito, S3, Secrets Manager)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+
+    # Authentication service (if needed for inter-service auth)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: preprod
+          podSelector:
+            matchLabels:
+              app: authentication-service
+      ports:
+        - protocol: TCP
+          port: 3001

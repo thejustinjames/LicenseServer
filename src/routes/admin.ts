@@ -12,6 +12,7 @@ import * as seatService from '../services/seat.service.js';
 import * as quoteService from '../services/quote.service.js';
 import * as desktopService from '../services/desktop.service.js';
 import { prisma } from '../config/database.js';
+import { logger } from '../services/logger.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 // Configure multer for memory storage (files up to 500MB)
@@ -132,7 +133,7 @@ router.post('/products', async (req: AuthenticatedRequest, res: Response) => {
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Create product error:', error);
+    logger.error('Create product error:', error);
     res.status(500).json({ error: 'Failed to create product' });
   }
 });
@@ -144,7 +145,7 @@ router.get('/products', async (req: AuthenticatedRequest, res: Response) => {
     const products = await productService.listProducts({ search, category });
     res.json(products);
   } catch (error) {
-    console.error('List products error:', error);
+    logger.error('List products error:', error);
     res.status(500).json({ error: 'Failed to list products' });
   }
 });
@@ -154,7 +155,7 @@ router.get('/products/categories', async (_req: AuthenticatedRequest, res: Respo
     const categories = await productService.listCategories();
     res.json(categories);
   } catch (error) {
-    console.error('List categories error:', error);
+    logger.error('List categories error:', error);
     res.status(500).json({ error: 'Failed to list categories' });
   }
 });
@@ -168,7 +169,7 @@ router.get('/products/:id', async (req: AuthenticatedRequest, res: Response) => 
     }
     res.json(product);
   } catch (error) {
-    console.error('Get product error:', error);
+    logger.error('Get product error:', error);
     res.status(500).json({ error: 'Failed to get product' });
   }
 });
@@ -186,7 +187,7 @@ router.put('/products/:id', async (req: AuthenticatedRequest, res: Response) => 
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Update product error:', error);
+    logger.error('Update product error:', error);
     res.status(500).json({ error: 'Failed to update product' });
   }
 });
@@ -200,7 +201,7 @@ router.delete('/products/:id', async (req: AuthenticatedRequest, res: Response) 
       res.status(400).json({ error: error.message });
       return;
     }
-    console.error('Delete product error:', error);
+    logger.error('Delete product error:', error);
     res.status(500).json({ error: 'Failed to delete product' });
   }
 });
@@ -219,7 +220,7 @@ router.post('/licenses', async (req: AuthenticatedRequest, res: Response) => {
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Create license error:', error);
+    logger.error('Create license error:', error);
     res.status(500).json({ error: 'Failed to create license' });
   }
 });
@@ -234,7 +235,7 @@ router.get('/licenses', async (req: AuthenticatedRequest, res: Response) => {
     const licenses = await licenseService.listLicenses(filters);
     res.json(licenses);
   } catch (error) {
-    console.error('List licenses error:', error);
+    logger.error('List licenses error:', error);
     res.status(500).json({ error: 'Failed to list licenses' });
   }
 });
@@ -248,7 +249,7 @@ router.get('/licenses/:id', async (req: AuthenticatedRequest, res: Response) => 
     }
     res.json(license);
   } catch (error) {
-    console.error('Get license error:', error);
+    logger.error('Get license error:', error);
     res.status(500).json({ error: 'Failed to get license' });
   }
 });
@@ -266,7 +267,7 @@ router.put('/licenses/:id', async (req: AuthenticatedRequest, res: Response) => 
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Update license error:', error);
+    logger.error('Update license error:', error);
     res.status(500).json({ error: 'Failed to update license' });
   }
 });
@@ -276,7 +277,7 @@ router.post('/licenses/:id/revoke', async (req: AuthenticatedRequest, res: Respo
     const license = await licenseService.revokeLicense(req.params.id);
     res.json(license);
   } catch (error) {
-    console.error('Revoke license error:', error);
+    logger.error('Revoke license error:', error);
     res.status(500).json({ error: 'Failed to revoke license' });
   }
 });
@@ -286,7 +287,7 @@ router.post('/licenses/:id/suspend', async (req: AuthenticatedRequest, res: Resp
     const license = await licenseService.suspendLicense(req.params.id);
     res.json(license);
   } catch (error) {
-    console.error('Suspend license error:', error);
+    logger.error('Suspend license error:', error);
     res.status(500).json({ error: 'Failed to suspend license' });
   }
 });
@@ -296,7 +297,7 @@ router.post('/licenses/:id/reactivate', async (req: AuthenticatedRequest, res: R
     const license = await licenseService.reactivateLicense(req.params.id);
     res.json(license);
   } catch (error) {
-    console.error('Reactivate license error:', error);
+    logger.error('Reactivate license error:', error);
     res.status(500).json({ error: 'Failed to reactivate license' });
   }
 });
@@ -310,7 +311,7 @@ router.get('/licenses/:id/offline-token', async (req: AuthenticatedRequest, res:
     }
     res.json({ token });
   } catch (error) {
-    console.error('Generate offline token error:', error);
+    logger.error('Generate offline token error:', error);
     res.status(500).json({ error: 'Failed to generate offline token' });
   }
 });
@@ -349,7 +350,7 @@ router.get('/licenses/:id/seats', async (req: AuthenticatedRequest, res: Respons
       total: result.total,
     });
   } catch (error) {
-    console.error('Get seat assignments error:', error);
+    logger.error('Get seat assignments error:', error);
     res.status(500).json({ error: 'Failed to get seat assignments' });
   }
 });
@@ -381,7 +382,7 @@ router.post('/licenses/:id/seats', async (req: AuthenticatedRequest, res: Respon
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Assign seat error:', error);
+    logger.error('Assign seat error:', error);
     res.status(500).json({ error: 'Failed to assign seat' });
   }
 });
@@ -404,7 +405,7 @@ router.post('/licenses/:id/seats/bulk', async (req: AuthenticatedRequest, res: R
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Bulk assign seats error:', error);
+    logger.error('Bulk assign seats error:', error);
     res.status(500).json({ error: 'Failed to bulk assign seats' });
   }
 });
@@ -421,7 +422,7 @@ router.delete('/licenses/:id/seats/:email', async (req: AuthenticatedRequest, re
 
     res.status(204).send();
   } catch (error) {
-    console.error('Remove seat error:', error);
+    logger.error('Remove seat error:', error);
     res.status(500).json({ error: 'Failed to remove seat' });
   }
 });
@@ -438,7 +439,7 @@ router.post('/licenses/:id/seats/:email/resend', async (req: AuthenticatedReques
 
     res.json({ success: true, message: 'Invite resent' });
   } catch (error) {
-    console.error('Resend seat invite error:', error);
+    logger.error('Resend seat invite error:', error);
     res.status(500).json({ error: 'Failed to resend invite' });
   }
 });
@@ -449,7 +450,7 @@ router.get('/licenses/:id/activations', async (req: AuthenticatedRequest, res: R
     const result = await desktopService.listDesktopActivations(req.params.id);
     res.json(result);
   } catch (error) {
-    console.error('List activations error:', error);
+    logger.error('List activations error:', error);
     res.status(500).json({ error: 'Failed to list activations' });
   }
 });
@@ -466,7 +467,7 @@ router.delete('/activations/:id', async (req: AuthenticatedRequest, res: Respons
 
     res.status(204).send();
   } catch (error) {
-    console.error('Revoke activation error:', error);
+    logger.error('Revoke activation error:', error);
     res.status(500).json({ error: 'Failed to revoke activation' });
   }
 });
@@ -500,7 +501,7 @@ router.get('/quotes', async (req: AuthenticatedRequest, res: Response) => {
     });
     res.json(quotes);
   } catch (error) {
-    console.error('List quotes error:', error);
+    logger.error('List quotes error:', error);
     res.status(500).json({ error: 'Failed to list quotes' });
   }
 });
@@ -516,7 +517,7 @@ router.post('/quotes', async (req: AuthenticatedRequest, res: Response) => {
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Create quote error:', error);
+    logger.error('Create quote error:', error);
     res.status(500).json({ error: 'Failed to create quote' });
   }
 });
@@ -531,7 +532,7 @@ router.get('/quotes/:id', async (req: AuthenticatedRequest, res: Response) => {
     }
     res.json(quote);
   } catch (error) {
-    console.error('Get quote error:', error);
+    logger.error('Get quote error:', error);
     res.status(500).json({ error: 'Failed to get quote' });
   }
 });
@@ -548,7 +549,7 @@ router.post('/quotes/:id/send', async (req: AuthenticatedRequest, res: Response)
 
     res.json({ success: true, message: 'Quote sent' });
   } catch (error) {
-    console.error('Send quote error:', error);
+    logger.error('Send quote error:', error);
     res.status(500).json({ error: 'Failed to send quote' });
   }
 });
@@ -568,7 +569,7 @@ router.put('/quotes/:id/status', async (req: AuthenticatedRequest, res: Response
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Update quote status error:', error);
+    logger.error('Update quote status error:', error);
     res.status(500).json({ error: 'Failed to update quote status' });
   }
 });
@@ -598,7 +599,7 @@ router.post('/quotes/:id/convert', async (req: AuthenticatedRequest, res: Respon
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Convert quote error:', error);
+    logger.error('Convert quote error:', error);
     res.status(500).json({ error: 'Failed to convert quote' });
   }
 });
@@ -613,7 +614,7 @@ router.post('/quotes/:id/duplicate', async (req: AuthenticatedRequest, res: Resp
       res.status(404).json({ error: 'Quote not found' });
       return;
     }
-    console.error('Duplicate quote error:', error);
+    logger.error('Duplicate quote error:', error);
     res.status(500).json({ error: 'Failed to duplicate quote' });
   }
 });
@@ -624,7 +625,7 @@ router.get('/customers', async (_req: AuthenticatedRequest, res: Response) => {
     const customers = await customerService.listCustomers();
     res.json(customers);
   } catch (error) {
-    console.error('List customers error:', error);
+    logger.error('List customers error:', error);
     res.status(500).json({ error: 'Failed to list customers' });
   }
 });
@@ -638,7 +639,7 @@ router.get('/customers/:id', async (req: AuthenticatedRequest, res: Response) =>
     }
     res.json(customer);
   } catch (error) {
-    console.error('Get customer error:', error);
+    logger.error('Get customer error:', error);
     res.status(500).json({ error: 'Failed to get customer' });
   }
 });
@@ -648,7 +649,7 @@ router.get('/customers/:id/licenses', async (req: AuthenticatedRequest, res: Res
     const licenses = await licenseService.getLicensesByCustomerId(req.params.id);
     res.json(licenses);
   } catch (error) {
-    console.error('Get customer licenses error:', error);
+    logger.error('Get customer licenses error:', error);
     res.status(500).json({ error: 'Failed to get customer licenses' });
   }
 });
@@ -691,7 +692,7 @@ router.get('/dashboard/stats', async (_req: AuthenticatedRequest, res: Response)
       recentLicenses,
     });
   } catch (error) {
-    console.error('Get dashboard stats error:', error);
+    logger.error('Get dashboard stats error:', error);
     res.status(500).json({ error: 'Failed to get dashboard stats' });
   }
 });
@@ -733,7 +734,7 @@ router.post('/subscriptions/:id/usage', async (req: AuthenticatedRequest, res: R
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Report usage error:', error);
+    logger.error('Report usage error:', error);
     res.status(500).json({ error: 'Failed to report usage' });
   }
 });
@@ -748,7 +749,7 @@ router.get('/subscriptions/:id/usage', async (req: AuthenticatedRequest, res: Re
     }
     res.json(summary);
   } catch (error) {
-    console.error('Get usage summary error:', error);
+    logger.error('Get usage summary error:', error);
     res.status(500).json({ error: 'Failed to get usage summary' });
   }
 });
@@ -763,7 +764,7 @@ router.get('/subscriptions/:id/usage/records', async (req: AuthenticatedRequest,
     });
     res.json(records);
   } catch (error) {
-    console.error('Get usage records error:', error);
+    logger.error('Get usage records error:', error);
     res.status(500).json({ error: 'Failed to get usage records' });
   }
 });
@@ -802,7 +803,7 @@ router.post('/products/:id/metered-price', async (req: AuthenticatedRequest, res
         return;
       }
     }
-    console.error('Create metered price error:', error);
+    logger.error('Create metered price error:', error);
     res.status(500).json({ error: 'Failed to create metered price' });
   }
 });
@@ -817,7 +818,7 @@ router.get('/tax/codes', async (_req: AuthenticatedRequest, res: Response) => {
     const taxCodes = productService.getCommonTaxCodes();
     res.json(taxCodes);
   } catch (error) {
-    console.error('Get tax codes error:', error);
+    logger.error('Get tax codes error:', error);
     res.status(500).json({ error: 'Failed to get tax codes' });
   }
 });
@@ -842,7 +843,7 @@ router.put('/products/:id/tax-code', async (req: AuthenticatedRequest, res: Resp
       res.status(404).json({ error: error.message });
       return;
     }
-    console.error('Update tax code error:', error);
+    logger.error('Update tax code error:', error);
     res.status(500).json({ error: 'Failed to update tax code' });
   }
 });
@@ -857,7 +858,7 @@ router.get('/products/:id/pricing', async (req: AuthenticatedRequest, res: Respo
     }
     res.json(pricing);
   } catch (error) {
-    console.error('Get pricing info error:', error);
+    logger.error('Get pricing info error:', error);
     res.status(500).json({ error: 'Failed to get pricing info' });
   }
 });
@@ -878,7 +879,7 @@ router.get('/subscriptions', async (req: AuthenticatedRequest, res: Response) =>
     });
     res.json(subscriptions);
   } catch (error) {
-    console.error('List subscriptions error:', error);
+    logger.error('List subscriptions error:', error);
     res.status(500).json({ error: 'Failed to list subscriptions' });
   }
 });
@@ -904,7 +905,7 @@ router.get('/subscriptions/:id', async (req: AuthenticatedRequest, res: Response
 
     res.json(subscription);
   } catch (error) {
-    console.error('Get subscription error:', error);
+    logger.error('Get subscription error:', error);
     res.status(500).json({ error: 'Failed to get subscription' });
   }
 });
@@ -925,7 +926,7 @@ router.get('/refunds', async (req: AuthenticatedRequest, res: Response) => {
     });
     res.json(refunds);
   } catch (error) {
-    console.error('List refunds error:', error);
+    logger.error('List refunds error:', error);
     res.status(500).json({ error: 'Failed to list refunds' });
   }
 });
@@ -965,7 +966,7 @@ router.post('/coupons', async (req: AuthenticatedRequest, res: Response) => {
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Create coupon error:', error);
+    logger.error('Create coupon error:', error);
     res.status(500).json({ error: 'Failed to create coupon' });
   }
 });
@@ -979,7 +980,7 @@ router.get('/coupons', async (req: AuthenticatedRequest, res: Response) => {
     });
     res.json(coupons);
   } catch (error) {
-    console.error('List coupons error:', error);
+    logger.error('List coupons error:', error);
     res.status(500).json({ error: 'Failed to list coupons' });
   }
 });
@@ -990,7 +991,7 @@ router.get('/coupons/:id', async (req: AuthenticatedRequest, res: Response) => {
     const coupon = await paymentService.getCoupon(req.params.id);
     res.json(coupon);
   } catch (error) {
-    console.error('Get coupon error:', error);
+    logger.error('Get coupon error:', error);
     res.status(500).json({ error: 'Failed to get coupon' });
   }
 });
@@ -1011,7 +1012,7 @@ router.put('/coupons/:id', async (req: AuthenticatedRequest, res: Response) => {
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Update coupon error:', error);
+    logger.error('Update coupon error:', error);
     res.status(500).json({ error: 'Failed to update coupon' });
   }
 });
@@ -1022,7 +1023,7 @@ router.delete('/coupons/:id', async (req: AuthenticatedRequest, res: Response) =
     await paymentService.deleteCoupon(req.params.id);
     res.status(204).send();
   } catch (error) {
-    console.error('Delete coupon error:', error);
+    logger.error('Delete coupon error:', error);
     res.status(500).json({ error: 'Failed to delete coupon' });
   }
 });
@@ -1053,7 +1054,7 @@ router.post('/promotion-codes', async (req: AuthenticatedRequest, res: Response)
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Create promotion code error:', error);
+    logger.error('Create promotion code error:', error);
     res.status(500).json({ error: 'Failed to create promotion code' });
   }
 });
@@ -1069,7 +1070,7 @@ router.get('/promotion-codes', async (req: AuthenticatedRequest, res: Response) 
     });
     res.json(promoCodes);
   } catch (error) {
-    console.error('List promotion codes error:', error);
+    logger.error('List promotion codes error:', error);
     res.status(500).json({ error: 'Failed to list promotion codes' });
   }
 });
@@ -1080,7 +1081,7 @@ router.get('/promotion-codes/:id', async (req: AuthenticatedRequest, res: Respon
     const promoCode = await paymentService.getPromotionCode(req.params.id);
     res.json(promoCode);
   } catch (error) {
-    console.error('Get promotion code error:', error);
+    logger.error('Get promotion code error:', error);
     res.status(500).json({ error: 'Failed to get promotion code' });
   }
 });
@@ -1101,7 +1102,7 @@ router.put('/promotion-codes/:id', async (req: AuthenticatedRequest, res: Respon
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Update promotion code error:', error);
+    logger.error('Update promotion code error:', error);
     res.status(500).json({ error: 'Failed to update promotion code' });
   }
 });
@@ -1112,7 +1113,7 @@ router.get('/promotion-codes/validate/:code', async (req: AuthenticatedRequest, 
     const result = await paymentService.validatePromotionCode(req.params.code);
     res.json(result);
   } catch (error) {
-    console.error('Validate promotion code error:', error);
+    logger.error('Validate promotion code error:', error);
     res.status(500).json({ error: 'Failed to validate promotion code' });
   }
 });
@@ -1179,7 +1180,7 @@ router.post(
         setActive: req.body.setActive === 'true',
       });
     } catch (error) {
-      console.error('Upload bundle error:', error);
+      logger.error('Upload bundle error:', error);
       if (error instanceof Error && error.message.includes('File type not allowed')) {
         res.status(400).json({ error: error.message });
         return;
@@ -1225,7 +1226,7 @@ router.get('/products/:id/bundles', async (req: AuthenticatedRequest, res: Respo
       s3Configured: true,
     });
   } catch (error) {
-    console.error('List bundles error:', error);
+    logger.error('List bundles error:', error);
     res.status(500).json({ error: 'Failed to list bundles' });
   }
 });
@@ -1259,7 +1260,7 @@ router.put('/products/:id/bundle', async (req: AuthenticatedRequest, res: Respon
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Set bundle error:', error);
+    logger.error('Set bundle error:', error);
     res.status(500).json({ error: 'Failed to set active bundle' });
   }
 });
@@ -1289,7 +1290,7 @@ router.delete('/products/:id/bundles/:key(*)', async (req: AuthenticatedRequest,
 
     res.status(204).send();
   } catch (error) {
-    console.error('Delete bundle error:', error);
+    logger.error('Delete bundle error:', error);
     res.status(500).json({ error: 'Failed to delete bundle' });
   }
 });

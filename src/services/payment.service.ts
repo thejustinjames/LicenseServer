@@ -5,6 +5,7 @@ import * as customerService from './customer.service.js';
 import * as licenseService from './license.service.js';
 import * as productService from './product.service.js';
 import * as emailService from './email.service.js';
+import { logger } from './logger.service.js';
 import Stripe from 'stripe';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -198,7 +199,7 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
   const subscriptionId = session.subscription as string | null;
 
   if (!customerEmail || !productId) {
-    console.error('Missing customer email or product ID in checkout session');
+    logger.error('Missing customer email or product ID in checkout session');
     return;
   }
 
@@ -237,7 +238,7 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
 
   const product = await productService.getProductById(productId);
   if (!product) {
-    console.error('Product not found:', productId);
+    logger.error('Product not found:', productId);
     return;
   }
 
@@ -375,7 +376,7 @@ export async function handleInvoicePaymentFailed(invoice: Stripe.Invoice): Promi
           portalUrl
         );
       } catch (error) {
-        console.error('Failed to send payment failed email:', error);
+        logger.error('Failed to send payment failed email:', error);
       }
     }
   }
@@ -391,7 +392,7 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
   const stripeCustomerId = charge.customer as string;
 
   if (!stripeCustomerId) {
-    console.log('Refund processed for guest checkout, no customer to update');
+    logger.info('Refund processed for guest checkout, no customer to update');
     return;
   }
 
@@ -401,7 +402,7 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
   });
 
   if (!customer) {
-    console.error('Customer not found for refund:', stripeCustomerId);
+    logger.error('Customer not found for refund:', stripeCustomerId);
     return;
   }
 
@@ -414,7 +415,7 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
     });
     refunds = refundList.data;
   } catch (error) {
-    console.error('Failed to fetch refunds from Stripe:', error);
+    logger.error('Failed to fetch refunds from Stripe:', error);
     // Fall back to charge.refunds if available
     refunds = charge.refunds?.data || [];
   }
@@ -443,12 +444,12 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
       },
     });
 
-    console.log(`Recorded refund ${refund.id} for ${refund.amount} ${refund.currency}`);
+    logger.info(`Recorded refund ${refund.id} for ${refund.amount} ${refund.currency}`);
   }
 
   // If fully refunded, revoke all active licenses for this customer
   if (isFullRefund) {
-    console.log(`Full refund processed for customer ${customer.id}, revoking licenses`);
+    logger.info(`Full refund processed for customer ${customer.id}, revoking licenses`);
 
     await prisma.license.updateMany({
       where: {
@@ -458,7 +459,7 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
       data: { status: 'REVOKED' },
     });
   } else {
-    console.log(`Partial refund of ${refundAmount} cents processed for customer ${customer.id}`);
+    logger.info(`Partial refund of ${refundAmount} cents processed for customer ${customer.id}`);
   }
 
   // Send refund notification email
@@ -489,14 +490,14 @@ export async function handleTrialWillEnd(subscription: Stripe.Subscription): Pro
   });
 
   if (!customer) {
-    console.error('Customer not found for trial ending:', stripeCustomerId);
+    logger.error('Customer not found for trial ending:', stripeCustomerId);
     return;
   }
 
   const trialEndDate = new Date(trialEnd * 1000);
   const daysRemaining = Math.ceil((trialEndDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 
-  console.log(`Trial ending for customer ${customer.id} in ${daysRemaining} days`);
+  logger.info(`Trial ending for customer ${customer.id} in ${daysRemaining} days`);
 
   // Update subscription with trial end info
   await prisma.subscription.update({
@@ -606,7 +607,7 @@ export async function reportUsage(input: ReportUsageInput): Promise<{ success: b
 
     return { success: true, usageRecordId: usageRecord.id };
   } catch (error) {
-    console.error('Failed to report usage:', error);
+    logger.error('Failed to report usage:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to report usage',
@@ -724,7 +725,7 @@ export async function calculateTax(priceId: string, customerAddress: {
       taxBehavior: config.STRIPE_TAX_BEHAVIOR,
     };
   } catch (error) {
-    console.error('Tax calculation failed:', error);
+    logger.error('Tax calculation failed:', error);
     return null;
   }
 }

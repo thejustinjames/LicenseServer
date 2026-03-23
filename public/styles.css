@@ -474,6 +474,27 @@ td {
   font-size: 0.9rem;
 }
 
+.btn-copy {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  color: #64748b;
+  vertical-align: middle;
+  margin-left: 0.25rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.btn-copy:hover {
+  background: #e2e8f0;
+  color: #2563eb;
+}
+
+.btn-copy svg {
+  display: block;
+}
+
 /* Alerts */
 .alert {
   padding: 1rem;

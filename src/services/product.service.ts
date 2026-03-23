@@ -2,6 +2,7 @@ import { prisma } from '../config/database.js';
 import { stripe } from '../config/stripe.js';
 import { Product, ValidationMode, PricingType, PurchaseType } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import { logger } from './logger.service.js';
 
 export interface CreateProductInput {
   name: string;
@@ -236,7 +237,7 @@ export async function updateProduct(id: string, input: UpdateProductInput): Prom
         { idempotencyKey }
       );
     } catch (error) {
-      console.warn('Failed to update Stripe product:', error instanceof Error ? error.message : error);
+      logger.warn('Failed to update Stripe product', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -265,7 +266,7 @@ export async function deleteProduct(id: string): Promise<void> {
         { idempotencyKey }
       );
     } catch (error) {
-      console.warn('Failed to archive Stripe product:', error instanceof Error ? error.message : error);
+      logger.warn('Failed to archive Stripe product', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -424,7 +425,7 @@ export async function getStripePricingInfo(productId: string): Promise<{
       taxBehavior: price.tax_behavior || undefined,
     };
   } catch (error) {
-    console.error('Failed to retrieve Stripe price:', error);
+    logger.error('Failed to retrieve Stripe price:', error);
     return null;
   }
 }

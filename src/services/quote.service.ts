@@ -2,6 +2,7 @@ import { prisma } from '../config/database.js';
 import { Quote, QuoteStatus, LicenseTerm, Prisma } from '@prisma/client';
 import { generateLicenseKey } from '../utils/license-key.js';
 import * as emailService from './email.service.js';
+import { logger } from './logger.service.js';
 
 export interface CreateQuoteInput {
   productId: string;
@@ -247,8 +248,33 @@ export async function sendQuote(id: string): Promise<{ success: boolean; error?:
   }
 
   try {
-    // TODO: Implement sendQuoteEmail in email service
-    // await emailService.sendQuoteEmail(quote);
+    // Get quote with product details
+    const quoteWithProduct = await prisma.quote.findUnique({
+      where: { id },
+      include: { product: { select: { name: true } } },
+    });
+
+    if (!quoteWithProduct || !quoteWithProduct.product) {
+      return { success: false, error: 'Quote or product not found' };
+    }
+
+    // Generate accept URL
+    const baseUrl = process.env.APP_URL || process.env.PUBLIC_URL || 'https://licensing.agencio.cloud';
+    const acceptUrl = `${baseUrl}/quote/${quoteWithProduct.quoteNumber}/accept`;
+
+    // Send quote email
+    await emailService.sendQuoteEmail(
+      quoteWithProduct.contactEmail,
+      quoteWithProduct.contactName || undefined,
+      quoteWithProduct.quoteNumber,
+      quoteWithProduct.product.name,
+      quoteWithProduct.seatCount,
+      quoteWithProduct.termYears,
+      quoteWithProduct.finalPrice,
+      quoteWithProduct.currency,
+      quoteWithProduct.validUntil.toISOString().split('T')[0],
+      acceptUrl
+    );
 
     await prisma.quote.update({
       where: { id },
@@ -257,7 +283,7 @@ export async function sendQuote(id: string): Promise<{ success: boolean; error?:
 
     return { success: true };
   } catch (error) {
-    console.error('Failed to send quote:', error);
+    logger.error('Failed to send quote:', error);
     return { success: false, error: 'Failed to send quote email' };
   }
 }

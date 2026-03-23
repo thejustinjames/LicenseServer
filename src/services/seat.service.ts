@@ -2,6 +2,7 @@ import { prisma } from '../config/database.js';
 import { SeatAssignment, License, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import * as emailService from './email.service.js';
+import { logger } from './logger.service.js';
 
 export interface AssignSeatInput {
   licenseId: string;
@@ -131,7 +132,7 @@ export async function assignSeat(input: AssignSeatInput): Promise<{
         inviteUrl
       );
     } catch (err) {
-      console.error('Failed to send seat invite email:', err);
+      logger.error('Failed to send seat invite email:', err);
     }
   }
 
@@ -349,7 +350,7 @@ export async function resendSeatInvite(
     );
     return { success: true };
   } catch (err) {
-    console.error('Failed to send seat invite email:', err);
+    logger.error('Failed to send seat invite email:', err);
     return { success: false, error: 'Failed to send invite email' };
   }
 }

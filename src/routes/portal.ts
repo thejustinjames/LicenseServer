@@ -38,7 +38,7 @@ router.get('/products', async (req, res: Response) => {
     }));
     res.json(publicProducts);
   } catch (error) {
-    console.error('List products error:', error);
+    logger.error('List products error:', error);
     res.status(500).json({ error: 'Failed to list products' });
   }
 });
@@ -48,7 +48,7 @@ router.get('/products/categories', async (_req, res: Response) => {
     const categories = await productService.listCategories();
     res.json(categories);
   } catch (error) {
-    console.error('List categories error:', error);
+    logger.error('List categories error:', error);
     res.status(500).json({ error: 'Failed to list categories' });
   }
 });
@@ -64,6 +64,7 @@ const registerSchema = z.object({
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string(),
+  captchaToken: z.string().optional(),
 });
 
 const forgotPasswordSchema = z.object({
@@ -106,12 +107,14 @@ router.post('/auth/register', authRateLimit, async (req, res: Response) => {
     }
 
     const customer = await customerService.createCustomer(data);
-    const auth = await customerService.authenticateCustomer(data.email, data.password);
+    const result = await customerService.authenticateCustomer(data.email, data.password);
 
-    if (!auth) {
+    if (customerService.isAuthError(result)) {
       res.status(500).json({ error: 'Failed to authenticate after registration' });
       return;
     }
+
+    const auth = result;
 
     // Set httpOnly cookie
     const authProvider = getAuthProvider();
@@ -145,16 +148,36 @@ router.post('/auth/register', authRateLimit, async (req, res: Response) => {
 router.post('/auth/login', authRateLimit, async (req, res: Response) => {
   try {
     const data = loginSchema.parse(req.body);
-    const auth = await customerService.authenticateCustomer(data.email, data.password);
 
-    if (!auth) {
+    // Verify CAPTCHA if enabled
+    if (captchaService.isCaptchaEnabled()) {
+      const captchaValid = await captchaService.verifyCaptcha(data.captchaToken);
+      if (!captchaValid) {
+        res.status(400).json({ error: 'CAPTCHA verification failed. Please try again.' });
+        return;
+      }
+    }
+
+    const result = await customerService.authenticateCustomer(data.email, data.password);
+
+    // Check if it's an auth error (lockout or invalid credentials)
+    if (customerService.isAuthError(result)) {
       logger.audit('login', {
         success: false,
-        details: { email: data.email },
+        details: { email: data.email, locked: result.locked },
       });
-      res.status(401).json({ error: 'Invalid email or password' });
+
+      const statusCode = result.locked ? 423 : 401; // 423 = Locked
+      res.status(statusCode).json({
+        error: result.error,
+        locked: result.locked,
+        lockoutMinutesRemaining: result.lockoutMinutesRemaining,
+      });
       return;
     }
+
+    // Success - result is AuthResult
+    const auth = result;
 
     // Set httpOnly cookie
     const authProvider = getAuthProvider();
@@ -300,7 +323,7 @@ router.get('/me', authenticate, async (req: AuthenticatedRequest, res: Response)
 
     res.json(customer);
   } catch (error) {
-    console.error('Get me error:', error);
+    logger.error('Get me error:', error);
     res.status(500).json({ error: 'Failed to get profile' });
   }
 });
@@ -325,7 +348,7 @@ router.put('/me', authenticate, async (req: AuthenticatedRequest, res: Response)
       res.status(400).json({ error: 'Validation error', details: error.errors });
       return;
     }
-    console.error('Update me error:', error);
+    logger.error('Update me error:', error);
     res.status(500).json({ error: 'Failed to update profile' });
   }
 });
@@ -340,7 +363,7 @@ router.get('/licenses', authenticate, async (req: AuthenticatedRequest, res: Res
     const licenses = await licenseService.getLicensesByCustomerId(req.user.id);
     res.json(licenses);
   } catch (error) {
-    console.error('Get licenses error:', error);
+    logger.error('Get licenses error:', error);
     res.status(500).json({ error: 'Failed to get licenses' });
   }
 });
@@ -374,7 +397,7 @@ router.get('/downloads/:productId', authenticate, async (req: AuthenticatedReque
         return;
       }
     }
-    console.error('Get download error:', error);
+    logger.error('Get download error:', error);
     res.status(500).json({ error: 'Failed to get download URL' });
   }
 });
@@ -402,7 +425,7 @@ router.get('/billing/validate-promo/:code', async (req, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('Validate promo code error:', error);
+    logger.error('Validate promo code error:', error);
     res.status(500).json({ error: 'Failed to validate promotion code' });
   }
 });
@@ -448,7 +471,7 @@ router.post('/billing/checkout', authenticate, async (req: AuthenticatedRequest,
         return;
       }
     }
-    console.error('Create checkout error:', error);
+    logger.error('Create checkout error:', error);
     res.status(500).json({ error: 'Failed to create checkout session' });
   }
 });
@@ -467,7 +490,7 @@ router.post('/billing/portal', authenticate, async (req: AuthenticatedRequest, r
       res.status(400).json({ error: 'No billing account found. Please make a purchase first.' });
       return;
     }
-    console.error('Create billing portal error:', error);
+    logger.error('Create billing portal error:', error);
     res.status(500).json({ error: 'Failed to create billing portal session' });
   }
 });
@@ -482,7 +505,7 @@ router.get('/subscriptions', authenticate, async (req: AuthenticatedRequest, res
     const subscriptions = await paymentService.getSubscriptionsByCustomerId(req.user.id);
     res.json(subscriptions);
   } catch (error) {
-    console.error('Get subscriptions error:', error);
+    logger.error('Get subscriptions error:', error);
     res.status(500).json({ error: 'Failed to get subscriptions' });
   }
 });
@@ -502,7 +525,7 @@ router.post('/subscriptions/:id/cancel', authenticate, async (req: Authenticated
       res.status(404).json({ error: 'Subscription not found' });
       return;
     }
-    console.error('Cancel subscription error:', error);
+    logger.error('Cancel subscription error:', error);
     res.status(500).json({ error: 'Failed to cancel subscription' });
   }
 });
@@ -522,7 +545,7 @@ router.post('/subscriptions/:id/reactivate', authenticate, async (req: Authentic
       res.status(404).json({ error: 'Subscription not found' });
       return;
     }
-    console.error('Reactivate subscription error:', error);
+    logger.error('Reactivate subscription error:', error);
     res.status(500).json({ error: 'Failed to reactivate subscription' });
   }
 });
@@ -543,7 +566,7 @@ router.get('/subscriptions/:id/usage', authenticate, async (req: AuthenticatedRe
 
     res.json(summary);
   } catch (error) {
-    console.error('Get usage summary error:', error);
+    logger.error('Get usage summary error:', error);
     res.status(500).json({ error: 'Failed to get usage summary' });
   }
 });
@@ -561,7 +584,7 @@ router.get('/subscriptions/:id/usage/records', authenticate, async (req: Authent
     });
     res.json(records);
   } catch (error) {
-    console.error('Get usage records error:', error);
+    logger.error('Get usage records error:', error);
     res.status(500).json({ error: 'Failed to get usage records' });
   }
 });
@@ -577,7 +600,7 @@ router.get('/refunds', authenticate, async (req: AuthenticatedRequest, res: Resp
     const refunds = await paymentService.getRefundsByCustomerId(req.user.id);
     res.json(refunds);
   } catch (error) {
-    console.error('Get refunds error:', error);
+    logger.error('Get refunds error:', error);
     res.status(500).json({ error: 'Failed to get refunds' });
   }
 });
@@ -622,7 +645,7 @@ router.get('/invite/:token', async (req, res: Response) => {
       assignedBy: assignment.license.customer.name || assignment.license.customer.email,
     });
   } catch (error) {
-    console.error('Verify invite error:', error);
+    logger.error('Verify invite error:', error);
     res.status(500).json({ valid: false, error: 'Failed to verify invite' });
   }
 });
@@ -687,22 +710,31 @@ router.post('/invite/:token/accept', authRateLimit, async (req, res: Response) =
     }
 
     // Authenticate the customer
-    const auth = await customerService.authenticateCustomer(assignment.email, data.password);
+    const authResult = await customerService.authenticateCustomer(assignment.email, data.password);
 
-    if (auth) {
+    if (!customerService.isAuthError(authResult)) {
       // Set auth cookie
       const authProvider = getAuthProvider();
       if (authProvider instanceof JWTAuthProvider) {
-        authProvider.setAuthCookie(res, auth.token);
+        authProvider.setAuthCookie(res, authResult.token);
       }
-    }
 
-    res.json({
-      success: true,
-      customer: auth?.customer,
-      token: auth?.token,
-      product: assignment.license.product.name,
-    });
+      res.json({
+        success: true,
+        customer: authResult.customer,
+        token: authResult.token,
+        product: assignment.license.product.name,
+      });
+    } else {
+      // Auth failed but invite was accepted
+      res.json({
+        success: true,
+        customer: null,
+        token: null,
+        product: assignment.license.product.name,
+        message: 'Invite accepted. Please log in to access your license.',
+      });
+    }
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ success: false, error: 'Validation error', details: error.errors });
@@ -715,7 +747,7 @@ router.post('/invite/:token/accept', authRateLimit, async (req, res: Response) =
       });
       return;
     }
-    console.error('Accept invite error:', error);
+    logger.error('Accept invite error:', error);
     res.status(500).json({ success: false, error: 'Failed to accept invite' });
   }
 });
@@ -731,7 +763,7 @@ router.get('/seats', authenticate, async (req: AuthenticatedRequest, res: Respon
     const seats = await seatService.getSeatsByEmail(req.user.email);
     res.json(seats);
   } catch (error) {
-    console.error('Get seats error:', error);
+    logger.error('Get seats error:', error);
     res.status(500).json({ error: 'Failed to get seat assignments' });
   }
 });

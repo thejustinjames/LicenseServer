@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: preprod
+  labels:
+    name: preprod
+    environment: preprod
+    managed-by: kustomize

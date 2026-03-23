@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: license-server
+  namespace: preprod
+  labels:
+    app: license-server
+    version: "1.0.0"
+    component: licensing
+    part-of: agencio
+    managed-by: kustomize
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: license-server
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: license-server
+        version: "1.0.0"
+        component: licensing
+        part-of: agencio
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3030"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: license-server-sa
+
+      # Pod anti-affinity for high availability
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: license-server
+                topologyKey: kubernetes.io/hostname
+
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+
+      containers:
+        - name: license-server
+          # ECR image - IRSA handles authentication
+          image: 772693061584.dkr.ecr.ap-southeast-1.amazonaws.com/ag-license-server:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 3030
+              protocol: TCP
+
+          # Environment from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: license-server-config
+
+          # Additional environment variables
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+
+          # Resource limits
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+              ephemeral-storage: 512Mi
+
+          # Health checks
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Security context for container
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+
+          # Volume mounts
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: keys
+              mountPath: /app/keys
+              readOnly: true
+
+      # Volumes
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: keys
+          secret:
+            secretName: license-server-keys
+            optional: true
+
+      # Termination grace period
+      terminationGracePeriodSeconds: 30

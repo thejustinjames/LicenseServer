@@ -125,7 +125,7 @@ export async function blacklistToken(jti: string, expiresAt: number): Promise<vo
     IN_MEMORY_BLACKLIST.set(jti, expiresAt);
   }
 
-  logger.debug('Token blacklisted', { jti, ttlSeconds });
+  console.debug('Token blacklisted', { jti, ttlSeconds });
 }
 
 /**

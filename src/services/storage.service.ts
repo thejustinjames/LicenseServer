@@ -10,6 +10,7 @@ import { s3Client } from '../config/s3.js';
 import { config } from '../config/index.js';
 import * as productService from './product.service.js';
 import * as licenseService from './license.service.js';
+import { logger } from './logger.service.js';
 
 // Download link expiry in seconds (default 4 hours)
 const DOWNLOAD_EXPIRY_SECONDS = parseInt(config.S3_DOWNLOAD_EXPIRY_HOURS || '4', 10) * 3600;
@@ -267,7 +268,7 @@ export async function listFiles(prefix: string): Promise<S3ListItem[]> {
 
     return items;
   } catch (error) {
-    console.error('Failed to list files:', error);
+    logger.error('Failed to list files:', error);
     return [];
   }
 }
@@ -289,7 +290,7 @@ export async function deleteFile(key: string): Promise<boolean> {
     await s3Client.send(command);
     return true;
   } catch (error) {
-    console.error('Failed to delete file:', error);
+    logger.error('Failed to delete file:', error);
     return false;
   }
 }

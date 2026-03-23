@@ -3,25 +3,26 @@ import { z } from 'zod';
 import { validationRateLimit } from '../middleware/rateLimit.js';
 import * as licenseService from '../services/license.service.js';
 import { getPublicKey } from '../utils/crypto.js';
+import { logger } from '../services/logger.service.js';
 
 const router = Router();
 
 router.use(validationRateLimit);
 
 const validateSchema = z.object({
-  licenseKey: z.string().regex(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/, 'Invalid license key format'),
+  licenseKey: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
   machineFingerprint: z.string().optional(),
   productId: z.string().uuid().optional(),
 });
 
 const activateSchema = z.object({
-  licenseKey: z.string().regex(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/, 'Invalid license key format'),
+  licenseKey: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
   machineFingerprint: z.string().min(1),
   machineName: z.string().optional(),
 });
 
 const deactivateSchema = z.object({
-  licenseKey: z.string().regex(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/, 'Invalid license key format'),
+  licenseKey: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
   machineFingerprint: z.string().min(1),
 });
 
@@ -44,7 +45,7 @@ router.post('/validate', async (req: Request, res: Response) => {
       res.status(400).json({ valid: false, error: 'Invalid request', details: error.errors });
       return;
     }
-    console.error('Validate error:', error);
+    logger.error('Validate error:', error);
     res.status(500).json({ valid: false, error: 'Validation failed' });
   }
 });
@@ -78,7 +79,7 @@ router.post('/activate', async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: 'Invalid request', details: error.errors });
       return;
     }
-    console.error('Activate error:', error);
+    logger.error('Activate error:', error);
     res.status(500).json({ success: false, error: 'Activation failed' });
   }
 });
@@ -102,7 +103,7 @@ router.post('/deactivate', async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: 'Invalid request', details: error.errors });
       return;
     }
-    console.error('Deactivate error:', error);
+    logger.error('Deactivate error:', error);
     res.status(500).json({ success: false, error: 'Deactivation failed' });
   }
 });

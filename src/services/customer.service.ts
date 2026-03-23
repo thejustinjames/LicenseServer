@@ -11,6 +11,8 @@ import { logger } from './logger.service.js';
 
 const SALT_ROUNDS = 12;
 const PASSWORD_RESET_EXPIRY_HOURS = 1;
+const LOCKOUT_ATTEMPTS = parseInt(process.env.ACCOUNT_LOCKOUT_ATTEMPTS || '5', 10);
+const LOCKOUT_DURATION_MINUTES = parseInt(process.env.ACCOUNT_LOCKOUT_DURATION_MINUTES || '15', 10);
 
 export interface CreateCustomerInput {
   email: string;
@@ -49,7 +51,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
     });
     stripeCustomerId = stripeCustomer.id;
   } catch (error) {
-    console.warn('Failed to create Stripe customer:', error instanceof Error ? error.message : error);
+    logger.warn('Failed to create Stripe customer', { error: error instanceof Error ? error.message : String(error) });
   }
 
   const customer = await prisma.customer.create({
@@ -65,7 +67,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
   // Send welcome email (don't await - fire and forget)
   if (!input.isAdmin) {
     emailService.sendWelcomeEmail(customer.email, customer.name || undefined).catch((err) => {
-      console.error('Failed to send welcome email:', err);
+      logger.error('Failed to send welcome email', err);
     });
   }
 
@@ -128,14 +130,25 @@ export async function deleteCustomer(id: string): Promise<void> {
     try {
       await stripe.customers.del(customer.stripeCustomerId);
     } catch (error) {
-      console.warn('Failed to delete Stripe customer:', error instanceof Error ? error.message : error);
+      logger.warn('Failed to delete Stripe customer', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
   await prisma.customer.delete({ where: { id } });
 }
 
-export async function authenticateCustomer(email: string, password: string): Promise<{ customer: CustomerWithoutPassword; token: string } | null> {
+export interface AuthResult {
+  customer: CustomerWithoutPassword;
+  token: string;
+}
+
+export interface AuthError {
+  error: string;
+  locked?: boolean;
+  lockoutMinutesRemaining?: number;
+}
+
+export async function authenticateCustomer(email: string, password: string): Promise<AuthResult | AuthError> {
   const customer = await prisma.customer.findUnique({
     where: { email },
   });
@@ -144,10 +157,70 @@ export async function authenticateCustomer(email: string, password: string): Pro
   // Always perform bcrypt comparison even for non-existent users
   const dummyHash = '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.SQyf6Vn6Qq.Sjy';
   const hashToCompare = customer?.passwordHash || dummyHash;
+
+  // Check if account is locked
+  if (customer?.lockedUntil) {
+    const now = new Date();
+    if (customer.lockedUntil > now) {
+      const minutesRemaining = Math.ceil((customer.lockedUntil.getTime() - now.getTime()) / (1000 * 60));
+      logger.warn('Login attempt on locked account', { email, minutesRemaining });
+      return {
+        error: `Account is locked. Please try again in ${minutesRemaining} minute${minutesRemaining === 1 ? '' : 's'}.`,
+        locked: true,
+        lockoutMinutesRemaining: minutesRemaining,
+      };
+    }
+    // Lock has expired, clear it
+    await prisma.customer.update({
+      where: { id: customer.id },
+      data: { lockedUntil: null, failedLoginAttempts: 0 },
+    });
+  }
+
   const isValid = await bcrypt.compare(password, hashToCompare);
 
   if (!customer || !isValid) {
-    return null;
+    // Increment failed attempts for existing customers
+    if (customer) {
+      const newFailedAttempts = customer.failedLoginAttempts + 1;
+
+      if (newFailedAttempts >= LOCKOUT_ATTEMPTS) {
+        // Lock the account
+        const lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60 * 1000);
+        await prisma.customer.update({
+          where: { id: customer.id },
+          data: {
+            failedLoginAttempts: newFailedAttempts,
+            lockedUntil,
+          },
+        });
+        logger.warn('Account locked due to failed login attempts', { email, attempts: newFailedAttempts });
+        return {
+          error: `Too many failed login attempts. Account locked for ${LOCKOUT_DURATION_MINUTES} minutes.`,
+          locked: true,
+          lockoutMinutesRemaining: LOCKOUT_DURATION_MINUTES,
+        };
+      } else {
+        await prisma.customer.update({
+          where: { id: customer.id },
+          data: { failedLoginAttempts: newFailedAttempts },
+        });
+        const attemptsRemaining = LOCKOUT_ATTEMPTS - newFailedAttempts;
+        logger.info('Failed login attempt', { email, failedAttempts: newFailedAttempts, attemptsRemaining });
+        return {
+          error: `Invalid email or password. ${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining before lockout.`,
+        };
+      }
+    }
+    return { error: 'Invalid email or password.' };
+  }
+
+  // Reset failed attempts on successful login
+  if (customer.failedLoginAttempts > 0) {
+    await prisma.customer.update({
+      where: { id: customer.id },
+      data: { failedLoginAttempts: 0, lockedUntil: null },
+    });
   }
 
   const token = jwt.sign(
@@ -156,7 +229,13 @@ export async function authenticateCustomer(email: string, password: string): Pro
     { expiresIn: config.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
 
+  logger.info('Successful login', { email });
   return { customer: omitPassword(customer), token };
+}
+
+// Helper to check if result is an auth error
+export function isAuthError(result: AuthResult | AuthError): result is AuthError {
+  return 'error' in result;
 }
 
 export async function createOrGetCustomerByEmail(email: string, name?: string): Promise<CustomerWithoutPassword> {
@@ -176,7 +255,7 @@ export async function createOrGetCustomerByEmail(email: string, name?: string): 
     });
     stripeCustomerId = stripeCustomer.id;
   } catch (error) {
-    console.warn('Failed to create Stripe customer:', error instanceof Error ? error.message : error);
+    logger.warn('Failed to create Stripe customer', { error: error instanceof Error ? error.message : String(error) });
   }
 
   const temporaryPassword = crypto.randomUUID();
@@ -207,14 +286,14 @@ export async function ensureAdminExists(): Promise<void> {
     return;
   }
 
-  console.log('Creating initial admin user...');
+  logger.info('Creating initial admin user...');
   await createCustomer({
     email: config.ADMIN_EMAIL,
     password: config.ADMIN_PASSWORD,
     name: 'Admin',
     isAdmin: true,
   });
-  console.log('Admin user created successfully');
+  logger.info('Admin user created successfully');
 }
 
 /**

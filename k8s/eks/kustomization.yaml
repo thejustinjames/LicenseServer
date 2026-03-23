@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: preprod
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - secret.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+  - networkpolicy.yaml
+
+commonLabels:
+  app: license-server
+  version: "1.0.0"
+  managed-by: kustomize
+  component: licensing
+  part-of: agencio
+
+images:
+  - name: license-server
+    newName: 772693061584.dkr.ecr.ap-southeast-1.amazonaws.com/ag-license-server
+    newTag: latest

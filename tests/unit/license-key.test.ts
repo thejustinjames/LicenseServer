@@ -52,9 +52,18 @@ describe('License Key Utilities', () => {
       expect(validateLicenseKeyFormat('invalid')).toBe(false);
     });
 
-    it('should reject keys with invalid characters', () => {
-      expect(validateLicenseKeyFormat('ABCD-EFGH-IJKL-MN01')).toBe(false);
+    it('should reject keys with invalid format', () => {
+      // Lowercase keys are rejected (regex requires uppercase)
       expect(validateLicenseKeyFormat('abcd-efgh-ijkl-mnop')).toBe(false);
+      // Special characters are rejected
+      expect(validateLicenseKeyFormat('ABCD-EFGH-IJKL-MN!@')).toBe(false);
+    });
+
+    it('should accept legacy keys with 0 or 1 (backward compatibility)', () => {
+      // Keys with 0 or 1 are allowed for backward compatibility
+      // These were created before the current checksum system
+      expect(validateLicenseKeyFormat('ABCD-EFGH-IJKL-MN01')).toBe(true);
+      expect(validateLicenseKeyFormat('1234-5678-90AB-CDEF')).toBe(true);
     });
 
     it('should reject keys with invalid checksum', () => {

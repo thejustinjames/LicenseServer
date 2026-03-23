@@ -56,6 +56,15 @@ services:
       # CORS
       CORS_ORIGINS: https://licencing.agencio.cloud,http://localhost:3000
 
+      # hCaptcha (get keys from https://dashboard.hcaptcha.com)
+      HCAPTCHA_SITE_KEY: ${HCAPTCHA_SITE_KEY:-}
+      HCAPTCHA_SECRET_KEY: ${HCAPTCHA_SECRET_KEY:-}
+      CAPTCHA_FAIL_OPEN: "false"
+
+      # Account lockout
+      ACCOUNT_LOCKOUT_ATTEMPTS: "5"
+      ACCOUNT_LOCKOUT_DURATION_MINUTES: "15"
+
       # Stripe (from .env)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}

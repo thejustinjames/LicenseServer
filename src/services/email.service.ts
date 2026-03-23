@@ -2,6 +2,7 @@ import { ClientSecretCredential } from '@azure/identity';
 import { Client } from '@microsoft/microsoft-graph-client';
 import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials/index.js';
 import { config } from '../config/index.js';
+import { logger } from './logger.service.js';
 
 // Email configuration
 interface EmailConfig {
@@ -45,7 +46,7 @@ export function initializeEmailService(): boolean {
   const senderEmail = config.EMAIL_SENDER;
 
   if (!tenantId || !clientId || !clientSecret || !senderEmail) {
-    console.log('Email service not configured (missing Azure AD credentials)');
+    logger.info('Email service not configured (missing Azure AD credentials)');
     return false;
   }
 
@@ -58,10 +59,10 @@ export function initializeEmailService(): boolean {
     });
 
     graphClient = Client.initWithMiddleware({ authProvider });
-    console.log('Email service initialized (Microsoft Graph)');
+    logger.info('Email service initialized (Microsoft Graph)');
     return true;
   } catch (error) {
-    console.error('Failed to initialize email service:', error);
+    logger.error('Failed to initialize email service:', error);
     return false;
   }
 }
@@ -78,7 +79,7 @@ export function isEmailServiceAvailable(): boolean {
  */
 export async function sendEmail(email: EmailData): Promise<boolean> {
   if (!graphClient || !emailConfig) {
-    console.warn('Email service not available, skipping email send');
+    logger.warn('Email service not available, skipping email send');
     return false;
   }
 
@@ -108,10 +109,10 @@ export async function sendEmail(email: EmailData): Promise<boolean> {
       .api(`/users/${emailConfig.senderEmail}/sendMail`)
       .post(message);
 
-    console.log(`Email sent: ${email.template} to ${email.to}`);
+    logger.info(`Email sent: ${email.template} to ${email.to}`);
     return true;
   } catch (error) {
-    console.error(`Failed to send email (${email.template}):`, error);
+    logger.error(`Failed to send email (${email.template}):`, error);
     return false;
   }
 }

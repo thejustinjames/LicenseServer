@@ -70,6 +70,25 @@ const envSchema = z.object({
   EMAIL_SENDER: z.string().email().optional(),
   APP_NAME: z.string().default('License Server'),
   SUPPORT_EMAIL: z.string().email().optional(),
+
+  // Application URL (for email links, password reset, etc.)
+  APP_URL: z.string().url().optional(),
+
+  // Redis Configuration
+  REDIS_URL: z.string().optional(),
+
+  // hCaptcha Configuration
+  HCAPTCHA_SITE_KEY: z.string().optional(),
+  HCAPTCHA_SECRET_KEY: z.string().optional(),
+  CAPTCHA_FAIL_OPEN: z.string().default('false'),
+
+  // Account Lockout Configuration
+  ACCOUNT_LOCKOUT_ATTEMPTS: z.string().default('5'),
+  ACCOUNT_LOCKOUT_DURATION_MINUTES: z.string().default('15'),
+
+  // License Configuration
+  OFFLINE_GRACE_DAYS: z.string().default('7'),
+  CHECK_IN_INTERVAL_DAYS: z.string().default('7'),
 });
 
 function loadConfig() {

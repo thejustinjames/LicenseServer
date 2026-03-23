@@ -341,7 +341,9 @@ function showAuthView(view) {
   }
 
   // Render CAPTCHA for views that need it
-  if (view === 'register') {
+  if (view === 'login') {
+    renderCaptcha('loginCaptcha');
+  } else if (view === 'register') {
     renderCaptcha('registerCaptcha');
   } else if (view === 'forgotPassword') {
     renderCaptcha('forgotCaptcha');
@@ -512,13 +514,19 @@ function loadProducts() {
           } else if (product.priceMonthly && product.priceMonthly > 0) {
             // Subscription with monthly pricing
             html += '<div class="product-price">SGD ' + (product.priceMonthly / 100).toFixed(0) + '<span>/month</span></div>';
-            if (product.priceAnnual) {
+            if (product.priceAnnual && product.hasAnnualPrice) {
               var annualPrice = (product.priceAnnual / 100).toLocaleString();
               var monthlyEquiv = Math.round(product.priceAnnual / 100 / 12);
-              html += '<div class="product-price-annual">or SGD ' + annualPrice + '/year <small>(~SGD ' + monthlyEquiv + '/mo)</small></div>';
+              var savings = Math.round((1 - (product.priceAnnual / (product.priceMonthly * 12))) * 100);
+              html += '<div class="product-price-annual">or SGD ' + annualPrice + '/year <small>(save ' + savings + '%)</small></div>';
             }
             if (product.hasStripePrice) {
-              html += '<button class="btn btn-success checkout-btn" data-product-id="' + product.id + '" style="width: 100%;">Subscribe Now</button>';
+              html += '<div class="btn-group" style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">';
+              html += '<button class="btn btn-success checkout-btn" data-product-id="' + product.id + '" data-billing="monthly" style="flex: 1;">Monthly</button>';
+              if (product.hasAnnualPrice) {
+                html += '<button class="btn btn-primary checkout-btn" data-product-id="' + product.id + '" data-billing="annual" style="flex: 1;">Yearly</button>';
+              }
+              html += '</div>';
             }
           } else if (product.priceAnnual) {
             // Annual-only subscription (Enterprise Packs)
@@ -545,7 +553,8 @@ function loadProducts() {
       for (var k = 0; k < checkoutBtns.length; k++) {
         checkoutBtns[k].addEventListener('click', function(e) {
           var productId = e.target.getAttribute('data-product-id');
-          checkout(productId);
+          var billingInterval = e.target.getAttribute('data-billing') || 'monthly';
+          checkout(productId, billingInterval);
         });
       }
     })
@@ -563,18 +572,71 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Copy to clipboard with feedback
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(function() {
+    // Show success feedback
+    var originalHtml = btn.innerHTML;
+    btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+    btn.style.color = '#22c55e';
+    setTimeout(function() {
+      btn.innerHTML = originalHtml;
+      btn.style.color = '';
+    }, 1500);
+  }).catch(function(err) {
+    console.error('Failed to copy:', err);
+    alert('Failed to copy to clipboard');
+  });
+}
+
 // Handle Login
 function handleLogin(event) {
   event.preventDefault();
   var alertEl = document.getElementById('loginAlert');
   var email = document.getElementById('loginEmail').value;
   var password = document.getElementById('loginPassword').value;
+  var captchaToken = getCaptchaToken('loginCaptcha');
 
-  api('/api/portal/auth/login', {
+  // Check CAPTCHA if enabled
+  if (captchaConfig.enabled && !captchaToken) {
+    alertEl.innerHTML = '<div class="alert alert-error">Please complete the CAPTCHA verification</div>';
+    return;
+  }
+
+  var requestBody = { email: email, password: password };
+  if (captchaToken) {
+    requestBody.captchaToken = captchaToken;
+  }
+
+  fetch(API_URL + '/api/portal/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email: email, password: password })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+    credentials: 'include'
   })
-  .then(function(data) {
+  .then(function(response) {
+    return response.json().then(function(data) {
+      return { ok: response.ok, status: response.status, data: data };
+    });
+  })
+  .then(function(result) {
+    if (!result.ok) {
+      // Check if account is locked
+      if (result.data.locked) {
+        var minutes = result.data.lockoutMinutesRemaining || 15;
+        alertEl.innerHTML = '<div class="alert alert-error">' +
+          '<strong>Account Locked</strong><br>' +
+          'Too many failed login attempts. ' +
+          'Please try again in ' + minutes + ' minute' + (minutes === 1 ? '' : 's') + '.' +
+          '</div>';
+      } else {
+        alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(result.data.error || 'Login failed') + '</div>';
+      }
+      resetCaptcha('loginCaptcha');
+      return;
+    }
+
+    var data = result.data;
     token = data.token;
     user = data.customer;
     localStorage.setItem('token', token);
@@ -593,6 +655,7 @@ function handleLogin(event) {
   })
   .catch(function(error) {
     alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
+    resetCaptcha('loginCaptcha');
   });
 }
 
@@ -701,8 +764,8 @@ function logout() {
 }
 
 // Checkout
-function checkout(productId) {
-  console.log('Checkout for product:', productId);
+function checkout(productId, billingInterval) {
+  console.log('Checkout for product:', productId, 'billing:', billingInterval);
   if (!user) {
     openAuthModal('login');
     return;
@@ -710,7 +773,7 @@ function checkout(productId) {
 
   api('/api/portal/billing/checkout', {
     method: 'POST',
-    body: JSON.stringify({ productId: productId })
+    body: JSON.stringify({ productId: productId, billingInterval: billingInterval || 'monthly' })
   })
   .then(function(data) {
     window.location.href = data.url;
@@ -747,7 +810,7 @@ function loadDashboard() {
         var license = licenses[i];
         html += '<tr>';
         html += '<td>' + escapeHtml(license.product.name) + '</td>';
-        html += '<td><code class="license-key">' + escapeHtml(license.key) + '</code></td>';
+        html += '<td><code class="license-key">' + escapeHtml(license.key) + '</code> <button class="btn-copy" data-key="' + escapeHtml(license.key) + '" title="Copy license key"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></td>';
         html += '<td><span class="status-badge status-' + license.status.toLowerCase() + '">' + license.status + '</span></td>';
         html += '<td>' + (license.expiresAt ? new Date(license.expiresAt).toLocaleDateString() : 'Never') + '</td>';
         html += '<td>' + license.activations.length + ' / ' + license.maxActivations + '</td>';
@@ -770,6 +833,16 @@ function loadDashboard() {
         downloadBtns[k].addEventListener('click', function(e) {
           var productId = e.target.getAttribute('data-product-id');
           getDownloadLink(productId);
+        });
+      }
+
+      // Bind copy buttons
+      var copyBtns = document.querySelectorAll('.btn-copy');
+      for (var c = 0; c < copyBtns.length; c++) {
+        copyBtns[c].addEventListener('click', function(e) {
+          var btn = e.currentTarget;
+          var key = btn.getAttribute('data-key');
+          copyToClipboard(key, btn);
         });
       }
     }

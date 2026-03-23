@@ -106,14 +106,16 @@ model Product {
 }
 
 model Customer {
-  id               String   @id @default(uuid())
-  email            String   @unique
-  passwordHash     String   @map("password_hash")
-  stripeCustomerId String?  @unique @map("stripe_customer_id")
-  name             String?
-  isAdmin          Boolean  @default(false) @map("is_admin")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  passwordHash        String    @map("password_hash")
+  stripeCustomerId    String?   @unique @map("stripe_customer_id")
+  name                String?
+  isAdmin             Boolean   @default(false) @map("is_admin")
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   licenses            License[]
   subscriptions       Subscription[]

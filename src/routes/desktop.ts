@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { validationRateLimit } from '../middleware/rateLimit.js';
 import * as desktopService from '../services/desktop.service.js';
+import { logger } from '../services/logger.service.js';
 
 const router = Router();
 
@@ -10,7 +11,7 @@ router.use(validationRateLimit);
 
 // Validation schemas
 const desktopValidateSchema = z.object({
-  licenseKey: z.string().regex(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/, 'Invalid license key format'),
+  licenseKey: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
   machineFingerprint: z.string().min(1),
   platform: z.enum(['windows', 'macos', 'linux']),
   appVersion: z.string().optional(),
@@ -18,7 +19,7 @@ const desktopValidateSchema = z.object({
 });
 
 const checkInSchema = z.object({
-  licenseKey: z.string().regex(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/, 'Invalid license key format'),
+  licenseKey: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
   machineFingerprint: z.string().min(1),
   appVersion: z.string().optional(),
   lastUsed: z.string().datetime().optional(),
@@ -61,7 +62,7 @@ router.post('/validate', async (req: Request, res: Response) => {
       res.status(400).json({ valid: false, error: 'Invalid request', details: error.errors });
       return;
     }
-    console.error('Desktop validate error:', error);
+    logger.error('Desktop validate error:', error);
     res.status(500).json({ valid: false, error: 'Validation failed' });
   }
 });
@@ -100,7 +101,7 @@ router.post('/checkin', async (req: Request, res: Response) => {
       res.status(400).json({ valid: false, error: 'Invalid request', details: error.errors });
       return;
     }
-    console.error('Desktop check-in error:', error);
+    logger.error('Desktop check-in error:', error);
     res.status(500).json({ valid: false, error: 'Check-in failed' });
   }
 });
@@ -138,7 +139,7 @@ router.get('/activation', async (req: Request, res: Response) => {
       lastCheckIn: activation.lastCheckIn,
     });
   } catch (error) {
-    console.error('Get activation error:', error);
+    logger.error('Get activation error:', error);
     res.status(500).json({ error: 'Failed to get activation details' });
   }
 });
