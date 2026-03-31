@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/index.js';
+import { logger } from '../services/logger.service.js';
 import type { OfflineLicensePayload } from '../types/index.js';
 
 let privateKey: string | null = null;
@@ -13,7 +14,7 @@ function loadKeys() {
       privateKey = fs.readFileSync(config.LICENSE_PRIVATE_KEY_PATH, 'utf8');
       publicKey = fs.readFileSync(config.LICENSE_PUBLIC_KEY_PATH, 'utf8');
     } catch (error) {
-      console.warn('Could not load RSA keys for offline licensing:', error);
+      logger.warn('Could not load RSA keys for offline licensing', { error: String(error) });
     }
   }
 }
@@ -22,7 +23,7 @@ loadKeys();
 
 export function generateOfflineLicenseToken(payload: OfflineLicensePayload): string | null {
   if (!privateKey) {
-    console.warn('Private key not available for offline license generation');
+    logger.warn('Private key not available for offline license generation');
     return null;
   }
 
@@ -34,7 +35,7 @@ export function generateOfflineLicenseToken(payload: OfflineLicensePayload): str
 
 export function verifyOfflineLicenseToken(token: string): OfflineLicensePayload | null {
   if (!publicKey) {
-    console.warn('Public key not available for offline license verification');
+    logger.warn('Public key not available for offline license verification');
     return null;
   }
 

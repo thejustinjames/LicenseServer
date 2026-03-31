@@ -72,16 +72,39 @@ function parseOrigins(originsStr: string): CorsOptions['origin'] {
 
 /**
  * Get CORS configuration from environment variables
+ * In production, requires explicit CORS_ORIGINS configuration for security
  */
 export function getCorsConfig(): CorsOptions {
-  const originsStr = process.env.CORS_ORIGINS || '*';
+  const isProduction = process.env.NODE_ENV === 'production';
+  const originsStr = process.env.CORS_ORIGINS;
   const methodsStr = process.env.CORS_METHODS || 'GET,POST,PUT,DELETE,OPTIONS';
   const headersStr = process.env.CORS_ALLOWED_HEADERS || 'Content-Type,Authorization,X-License-Key';
   const credentials = process.env.CORS_CREDENTIALS !== 'false';
   const maxAge = parseInt(process.env.CORS_MAX_AGE || '86400', 10);
 
+  // In production, require explicit origins - no wildcards allowed
+  let origin: CorsOptions['origin'];
+  if (isProduction) {
+    if (!originsStr || originsStr === '*') {
+      // Default to APP_URL in production if no explicit origins set
+      const appUrl = process.env.APP_URL;
+      if (appUrl) {
+        origin = parseOrigins(appUrl);
+      } else {
+        // Fail-safe: reject all cross-origin requests if not configured
+        origin = false;
+        console.warn('SECURITY WARNING: CORS_ORIGINS not configured in production. Cross-origin requests will be rejected.');
+      }
+    } else {
+      origin = parseOrigins(originsStr);
+    }
+  } else {
+    // Development: allow wildcard if not specified
+    origin = parseOrigins(originsStr || '*');
+  }
+
   return {
-    origin: parseOrigins(originsStr),
+    origin,
     methods: methodsStr.split(',').map(m => m.trim()),
     allowedHeaders: headersStr.split(',').map(h => h.trim()),
     credentials,

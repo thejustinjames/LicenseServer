@@ -46,10 +46,17 @@ spec:
         - protocol: TCP
           port: 3030
 
-    # Allow health checks from kubelet
+    # Allow health checks from kubelet (EKS node subnets)
+    # Replace with your VPC CIDR or node subnet CIDRs for tighter security
     - from:
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: 10.0.0.0/8  # Typical AWS VPC private range
+            except:
+              - 10.0.0.0/24  # Exclude internet-facing subnets if any
+        - ipBlock:
+            cidr: 172.16.0.0/12  # Alternative VPC range
+        - ipBlock:
+            cidr: 192.168.0.0/16  # Alternative VPC range
       ports:
         - protocol: TCP
           port: 3030

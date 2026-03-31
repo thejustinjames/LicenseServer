@@ -110,6 +110,12 @@ pub struct LicenseClient {
     http_client: reqwest::Client,
 }
 
+#[derive(Serialize, Deserialize)]
+struct CacheEntry {
+    timestamp: u64,
+    result: ValidationResult,
+}
+
 impl LicenseClient {
     pub fn new(config: LicenseClientConfig) -> Self {
         let machine_fingerprint = Self::generate_machine_fingerprint();
@@ -125,7 +131,7 @@ impl LicenseClient {
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .expect("Failed to create HTTP client");
+            .unwrap_or_else(|_| reqwest::Client::new());
 
         Self {
             config: LicenseClientConfig {
@@ -285,6 +291,17 @@ impl LicenseClient {
             .send()
             .await?;
 
+        // Check HTTP status before parsing JSON
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(LicenseError::Validation(format!(
+                "Server returned {}: {}",
+                status,
+                error_text
+            )));
+        }
+
         Ok(response.json().await?)
     }
 
@@ -306,12 +323,11 @@ impl LicenseClient {
             machine_name: &'a str,
         }
 
-        let name = machine_name.unwrap_or_else(|| {
-            hostname::get()
-                .map(|h| h.to_string_lossy().to_string())
-                .unwrap_or_else(|_| "Unknown".to_string())
-                .leak()
-        });
+        // Get machine name - use provided or fall back to hostname
+        let default_name = hostname::get()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "Unknown".to_string());
+        let name = machine_name.unwrap_or(default_name.as_str());
 
         match self
             .http_client
@@ -462,12 +478,6 @@ impl LicenseClient {
         self.cache_dir.join(format!("{}.json", hash))
     }
 
-    #[derive(Serialize, Deserialize)]
-    struct CacheEntry {
-        timestamp: u64,
-        result: ValidationResult,
-    }
-
     fn get_cached_validation(&self, license_key: &str) -> Option<ValidationResult> {
         let cache_path = self.get_cache_path(license_key);
         let data = fs::read_to_string(&cache_path).ok()?;
@@ -475,9 +485,9 @@ impl LicenseClient {
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .ok()?
             .as_secs();
-        let cache_age = Duration::from_secs(now - entry.timestamp);
+        let cache_age = Duration::from_secs(now.saturating_sub(entry.timestamp));
 
         // Within TTL
         if cache_age < self.config.cache_ttl {
@@ -494,11 +504,13 @@ impl LicenseClient {
 
     fn cache_validation(&self, license_key: &str, result: &ValidationResult) {
         let cache_path = self.get_cache_path(license_key);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
         let entry = CacheEntry {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp,
             result: result.clone(),
         };
 

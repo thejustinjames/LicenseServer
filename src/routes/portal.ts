@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { authenticate, getAuthProvider } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rateLimit.js';
+import { validateIdParam, validateUUIDParam, parsePositiveInt } from '../middleware/validation.js';
 import * as customerService from '../services/customer.service.js';
 import * as licenseService from '../services/license.service.js';
 import * as paymentService from '../services/payment.service.js';
@@ -116,10 +117,13 @@ router.post('/auth/register', authRateLimit, async (req, res: Response) => {
 
     const auth = result;
 
-    // Set httpOnly cookie
+    // Set httpOnly cookies (access + refresh)
     const authProvider = getAuthProvider();
     if (authProvider instanceof JWTAuthProvider) {
       authProvider.setAuthCookie(res, auth.token);
+      // Also issue refresh token for token rotation
+      const refreshToken = authProvider.generateRefreshToken(auth.customer);
+      authProvider.setRefreshCookie(res, refreshToken.token);
     }
 
     logger.audit('register', {
@@ -179,10 +183,13 @@ router.post('/auth/login', authRateLimit, async (req, res: Response) => {
     // Success - result is AuthResult
     const auth = result;
 
-    // Set httpOnly cookie
+    // Set httpOnly cookies (access + refresh)
     const authProvider = getAuthProvider();
     if (authProvider instanceof JWTAuthProvider) {
       authProvider.setAuthCookie(res, auth.token);
+      // Also issue refresh token for token rotation
+      const refreshToken = authProvider.generateRefreshToken(auth.customer);
+      authProvider.setRefreshCookie(res, refreshToken.token);
     }
 
     logger.audit('login', {
@@ -216,6 +223,40 @@ router.post('/auth/logout', authenticate, async (req: AuthenticatedRequest, res:
   } catch (error) {
     logger.error('Logout error', error);
     res.status(500).json({ error: 'Failed to logout' });
+  }
+});
+
+// Refresh token endpoint - rotates access and refresh tokens
+router.post('/auth/refresh', authRateLimit, async (req, res: Response) => {
+  try {
+    const authProvider = getAuthProvider();
+    if (!(authProvider instanceof JWTAuthProvider)) {
+      res.status(400).json({ error: 'Token refresh not supported with current auth provider' });
+      return;
+    }
+
+    // Get refresh token from cookie
+    const refreshToken = req.cookies?.refresh_token;
+    if (!refreshToken) {
+      res.status(401).json({ error: 'Refresh token required', code: 'AUTH_002' });
+      return;
+    }
+
+    const result = await authProvider.rotateTokens(refreshToken, res);
+
+    if (!result.success) {
+      res.status(401).json({ error: result.error || 'Token refresh failed', code: 'AUTH_003' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      customer: result.user,
+      message: 'Tokens refreshed successfully',
+    });
+  } catch (error) {
+    logger.error('Token refresh error', error);
+    res.status(500).json({ error: 'Failed to refresh token' });
   }
 });
 
@@ -368,7 +409,7 @@ router.get('/licenses', authenticate, async (req: AuthenticatedRequest, res: Res
   }
 });
 
-router.get('/downloads/:productId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/downloads/:productId', authenticate, validateUUIDParam('productId'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -511,7 +552,7 @@ router.get('/subscriptions', authenticate, async (req: AuthenticatedRequest, res
 });
 
 // Cancel subscription at period end
-router.post('/subscriptions/:id/cancel', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/subscriptions/:id/cancel', authenticate, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -531,7 +572,7 @@ router.post('/subscriptions/:id/cancel', authenticate, async (req: Authenticated
 });
 
 // Reactivate a canceled subscription
-router.post('/subscriptions/:id/reactivate', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/subscriptions/:id/reactivate', authenticate, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -551,7 +592,7 @@ router.post('/subscriptions/:id/reactivate', authenticate, async (req: Authentic
 });
 
 // Get usage summary for a subscription
-router.get('/subscriptions/:id/usage', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/subscriptions/:id/usage', authenticate, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -572,7 +613,7 @@ router.get('/subscriptions/:id/usage', authenticate, async (req: AuthenticatedRe
 });
 
 // Get usage records for a subscription
-router.get('/subscriptions/:id/usage/records', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/subscriptions/:id/usage/records', authenticate, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -580,7 +621,7 @@ router.get('/subscriptions/:id/usage/records', authenticate, async (req: Authent
     }
 
     const records = await paymentService.getUsageRecords(req.params.id, {
-      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+      limit: req.query.limit ? parsePositiveInt(req.query.limit as string, 100, 1000) : undefined,
     });
     res.json(records);
   } catch (error) {

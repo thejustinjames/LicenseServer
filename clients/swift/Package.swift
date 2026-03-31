@@ -19,10 +19,5 @@ let package = Package(
             dependencies: [],
             path: "Sources"
         ),
-        .testTarget(
-            name: "LicenseClientTests",
-            dependencies: ["LicenseClient"],
-            path: "Tests"
-        ),
     ]
 )

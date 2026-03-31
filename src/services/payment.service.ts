@@ -203,91 +203,97 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
     return;
   }
 
-  // Find or create customer
-  let customer = await prisma.customer.findUnique({
-    where: { stripeCustomerId },
-  });
-
-  if (!customer) {
-    customer = await prisma.customer.findUnique({
-      where: { email: customerEmail },
-    });
-
-    if (customer) {
-      await prisma.customer.update({
-        where: { id: customer.id },
-        data: { stripeCustomerId },
-      });
-    }
-  }
-
-  if (!customer) {
-    const tempPassword = crypto.randomUUID();
-    const bcrypt = await import('bcrypt');
-    const passwordHash = await bcrypt.hash(tempPassword, 12);
-
-    customer = await prisma.customer.create({
-      data: {
-        email: customerEmail,
-        passwordHash,
-        name: session.customer_details?.name,
-        stripeCustomerId,
-      },
-    });
-  }
-
   const product = await productService.getProductById(productId);
   if (!product) {
     logger.error('Product not found:', productId);
     return;
   }
 
-  // Handle subscription purchases
-  if (purchaseType === 'SUBSCRIPTION' && subscriptionId) {
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-
-    await prisma.subscription.upsert({
-      where: { stripeSubscriptionId: subscriptionId },
-      create: {
-        customerId: customer.id,
-        stripeSubscriptionId: subscriptionId,
-        status: 'ACTIVE',
-        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-        trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
-        cancelAtPeriodEnd: subscription.cancel_at_period_end,
-      },
-      update: {
-        status: 'ACTIVE',
-        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-        trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
-        cancelAtPeriodEnd: subscription.cancel_at_period_end,
-      },
+  // Use transaction to ensure atomicity of customer/subscription/license creation
+  const result = await prisma.$transaction(async (tx) => {
+    // Find or create customer
+    let customer = await tx.customer.findUnique({
+      where: { stripeCustomerId },
     });
-  }
 
-  // Calculate license expiration
-  let expiresAt: Date | undefined;
-  if (product.licenseDurationDays) {
-    expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + product.licenseDurationDays);
-  } else if (purchaseType === 'ONE_TIME') {
-    // One-time purchases get perpetual licenses (no expiration) unless duration is set
-    expiresAt = undefined;
-  }
+    if (!customer) {
+      customer = await tx.customer.findUnique({
+        where: { email: customerEmail },
+      });
 
-  // Create license for the customer
-  const license = await licenseService.createLicense({
-    customerId: customer.id,
-    productId: product.id,
-    expiresAt,
+      if (customer) {
+        customer = await tx.customer.update({
+          where: { id: customer.id },
+          data: { stripeCustomerId },
+        });
+      }
+    }
+
+    if (!customer) {
+      const tempPassword = crypto.randomUUID();
+      const bcrypt = await import('bcrypt');
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+      customer = await tx.customer.create({
+        data: {
+          email: customerEmail,
+          passwordHash,
+          name: session.customer_details?.name,
+          stripeCustomerId,
+        },
+      });
+    }
+
+    // Handle subscription purchases
+    if (purchaseType === 'SUBSCRIPTION' && subscriptionId) {
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+      await tx.subscription.upsert({
+        where: { stripeSubscriptionId: subscriptionId },
+        create: {
+          customerId: customer.id,
+          stripeSubscriptionId: subscriptionId,
+          status: 'ACTIVE',
+          currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+          trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
+          cancelAtPeriodEnd: subscription.cancel_at_period_end,
+        },
+        update: {
+          customerId: customer.id, // Ensure customerId is set on update too
+          status: 'ACTIVE',
+          currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+          trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
+          cancelAtPeriodEnd: subscription.cancel_at_period_end,
+        },
+      });
+    }
+
+    // Calculate license expiration
+    let expiresAt: Date | undefined;
+    if (product.licenseDurationDays) {
+      expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + product.licenseDurationDays);
+    } else if (purchaseType === 'ONE_TIME') {
+      // One-time purchases get perpetual licenses (no expiration) unless duration is set
+      expiresAt = undefined;
+    }
+
+    // Create license for the customer
+    const license = await licenseService.createLicense({
+      customerId: customer.id,
+      productId: product.id,
+      expiresAt,
+    });
+
+    return { customer, license };
   });
 
-  // Send license activated email
+  // Send license activated email (outside transaction - fire and forget)
   await emailService.sendLicenseActivatedEmail(
-    customer.email,
-    customer.name || undefined,
+    result.customer.email,
+    result.customer.name || undefined,
     product.name,
-    license.key
+    result.license.key
   );
 }
 
@@ -295,24 +301,47 @@ export async function handleSubscriptionUpdated(subscription: Stripe.Subscriptio
   const stripeSubscriptionId = subscription.id;
   const status = mapStripeStatus(subscription.status);
 
-  await prisma.subscription.upsert({
+  // First, check if subscription exists
+  const existingSubscription = await prisma.subscription.findUnique({
     where: { stripeSubscriptionId },
-    create: {
-      customerId: '', // This will be filled if it doesn't exist
-      stripeSubscriptionId,
-      status,
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    },
-    update: {
-      status,
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    },
   });
 
+  if (!existingSubscription) {
+    // Subscription doesn't exist - need to find customer from Stripe
+    const stripeCustomerId = subscription.customer as string;
+    const customer = await prisma.customer.findUnique({
+      where: { stripeCustomerId },
+    });
+
+    if (!customer) {
+      logger.error('Cannot create subscription: customer not found for Stripe customer:', stripeCustomerId);
+      return;
+    }
+
+    await prisma.subscription.create({
+      data: {
+        customerId: customer.id,
+        stripeSubscriptionId,
+        status,
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+    });
+  } else {
+    // Update existing subscription
+    await prisma.subscription.update({
+      where: { stripeSubscriptionId },
+      data: {
+        status,
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+    });
+  }
+
+  // Reactivate licenses if subscription is now active
   if (status === 'ACTIVE') {
     const dbSubscription = await prisma.subscription.findUnique({
       where: { stripeSubscriptionId },

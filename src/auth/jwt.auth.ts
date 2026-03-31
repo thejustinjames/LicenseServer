@@ -16,6 +16,8 @@ import type { AuthProviderInterface, AuthUser } from './index.js';
 
 // Cookie configuration
 export const AUTH_COOKIE_NAME = 'auth_token';
+export const REFRESH_COOKIE_NAME = 'refresh_token';
+
 export const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
@@ -24,6 +26,17 @@ export const COOKIE_OPTIONS = {
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
 };
 
+export const REFRESH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const,
+  path: '/api/portal/auth/refresh', // Only sent to refresh endpoint
+  maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
+};
+
+// Refresh token expiry (30 days)
+const REFRESH_TOKEN_EXPIRY = '30d';
+
 interface JwtPayload {
   id: string;
   email: string;
@@ -31,6 +44,7 @@ interface JwtPayload {
   jti?: string; // JWT ID for blacklisting
   iat?: number;
   exp?: number;
+  type?: 'access' | 'refresh'; // Token type
 }
 
 export class JWTAuthProvider implements AuthProviderInterface {
@@ -244,6 +258,139 @@ export class JWTAuthProvider implements AuthProviderInterface {
       }
     }
 
+    // Also blacklist refresh token if present
+    const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (refreshToken) {
+      try {
+        const decoded = jwt.decode(refreshToken) as JwtPayload | null;
+        if (decoded?.exp) {
+          const jti = decoded.jti || refreshToken.slice(-32);
+          const expiresAt = decoded.exp * 1000;
+          await blacklistToken(jti, expiresAt);
+        }
+      } catch {
+        // Ignore refresh token blacklist errors
+      }
+    }
+
     this.clearAuthCookie(res);
+    this.clearRefreshCookie(res);
+  }
+
+  /**
+   * Generate a refresh token for a user
+   */
+  generateRefreshToken(user: { id: string; email: string; isAdmin: boolean }): {
+    token: string;
+    jti: string;
+    expiresAt: number;
+  } {
+    const jti = uuidv4();
+    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, isAdmin: user.isAdmin, jti, type: 'refresh' },
+      config.JWT_SECRET,
+      { expiresIn: REFRESH_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] }
+    );
+
+    return { token, jti, expiresAt };
+  }
+
+  /**
+   * Verify a refresh token and return user info
+   */
+  async verifyRefreshToken(refreshToken: string): Promise<{
+    user: AuthUser | null;
+    error?: string;
+  }> {
+    try {
+      const decoded = jwt.verify(refreshToken, config.JWT_SECRET) as JwtPayload;
+
+      // Verify this is a refresh token
+      if (decoded.type !== 'refresh') {
+        return { user: null, error: 'Invalid token type' };
+      }
+
+      // Check blacklist
+      const jti = decoded.jti || refreshToken.slice(-32);
+      const isBlacklisted = await isTokenBlacklisted(jti);
+      if (isBlacklisted) {
+        return { user: null, error: 'Token has been revoked' };
+      }
+
+      return {
+        user: {
+          id: decoded.id,
+          email: decoded.email,
+          isAdmin: decoded.isAdmin,
+        },
+      };
+    } catch (error) {
+      if (error instanceof jwt.TokenExpiredError) {
+        return { user: null, error: 'Refresh token has expired' };
+      }
+      return { user: null, error: 'Invalid refresh token' };
+    }
+  }
+
+  /**
+   * Rotate tokens: generate new access and refresh tokens, blacklist old refresh
+   */
+  async rotateTokens(
+    oldRefreshToken: string,
+    res: Response
+  ): Promise<{ success: boolean; error?: string; user?: AuthUser }> {
+    const result = await this.verifyRefreshToken(oldRefreshToken);
+
+    if (!result.user) {
+      return { success: false, error: result.error };
+    }
+
+    // Blacklist old refresh token
+    try {
+      const decoded = jwt.decode(oldRefreshToken) as JwtPayload | null;
+      if (decoded?.exp) {
+        const jti = decoded.jti || oldRefreshToken.slice(-32);
+        const expiresAt = decoded.exp * 1000;
+        await blacklistToken(jti, expiresAt);
+      }
+    } catch {
+      // Continue even if blacklisting fails
+    }
+
+    // Generate new tokens
+    const accessToken = this.generateToken(result.user);
+    const refreshToken = this.generateRefreshToken(result.user);
+
+    // Set cookies
+    this.setAuthCookie(res, accessToken.token);
+    this.setRefreshCookie(res, refreshToken.token);
+
+    logger.audit('token_refresh', {
+      userId: result.user.id,
+      success: true,
+    });
+
+    return { success: true, user: result.user };
+  }
+
+  /**
+   * Set refresh cookie on response
+   */
+  setRefreshCookie(res: Response, token: string): void {
+    res.cookie(REFRESH_COOKIE_NAME, token, REFRESH_COOKIE_OPTIONS);
+  }
+
+  /**
+   * Clear refresh cookie
+   */
+  clearRefreshCookie(res: Response): void {
+    res.clearCookie(REFRESH_COOKIE_NAME, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/api/portal/auth/refresh',
+    });
   }
 }

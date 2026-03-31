@@ -5,6 +5,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string(),
   PORT: z.string().default('3000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default('7d'),
@@ -89,6 +90,10 @@ const envSchema = z.object({
   // License Configuration
   OFFLINE_GRACE_DAYS: z.string().default('7'),
   CHECK_IN_INTERVAL_DAYS: z.string().default('7'),
+
+  // Request Configuration
+  REQUEST_TIMEOUT_MS: z.string().default('30000'),
+  REQUEST_BODY_LIMIT: z.string().default('10mb'),
 });
 
 function loadConfig() {

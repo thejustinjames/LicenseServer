@@ -3,6 +3,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import { authenticate } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
+import { validateIdParam, parsePositiveInt, sanitizeString } from '../middleware/validation.js';
 import * as productService from '../services/product.service.js';
 import * as licenseService from '../services/license.service.js';
 import * as customerService from '../services/customer.service.js';
@@ -160,7 +161,7 @@ router.get('/products/categories', async (_req: AuthenticatedRequest, res: Respo
   }
 });
 
-router.get('/products/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/products/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const product = await productService.getProductById(req.params.id);
     if (!product) {
@@ -174,7 +175,7 @@ router.get('/products/:id', async (req: AuthenticatedRequest, res: Response) => 
   }
 });
 
-router.put('/products/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/products/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = updateProductSchema.parse(req.body);
     const product = await productService.updateProduct(req.params.id, {
@@ -192,7 +193,7 @@ router.put('/products/:id', async (req: AuthenticatedRequest, res: Response) => 
   }
 });
 
-router.delete('/products/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/products/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     await productService.deleteProduct(req.params.id);
     res.status(204).send();
@@ -240,7 +241,7 @@ router.get('/licenses', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-router.get('/licenses/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/licenses/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const license = await licenseService.getLicenseById(req.params.id);
     if (!license) {
@@ -254,7 +255,7 @@ router.get('/licenses/:id', async (req: AuthenticatedRequest, res: Response) => 
   }
 });
 
-router.put('/licenses/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/licenses/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = updateLicenseSchema.parse(req.body);
     const license = await licenseService.updateLicense(req.params.id, {
@@ -272,7 +273,7 @@ router.put('/licenses/:id', async (req: AuthenticatedRequest, res: Response) => 
   }
 });
 
-router.post('/licenses/:id/revoke', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/licenses/:id/revoke', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const license = await licenseService.revokeLicense(req.params.id);
     res.json(license);
@@ -282,7 +283,7 @@ router.post('/licenses/:id/revoke', async (req: AuthenticatedRequest, res: Respo
   }
 });
 
-router.post('/licenses/:id/suspend', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/licenses/:id/suspend', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const license = await licenseService.suspendLicense(req.params.id);
     res.json(license);
@@ -292,7 +293,7 @@ router.post('/licenses/:id/suspend', async (req: AuthenticatedRequest, res: Resp
   }
 });
 
-router.post('/licenses/:id/reactivate', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/licenses/:id/reactivate', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const license = await licenseService.reactivateLicense(req.params.id);
     res.json(license);
@@ -302,7 +303,7 @@ router.post('/licenses/:id/reactivate', async (req: AuthenticatedRequest, res: R
   }
 });
 
-router.get('/licenses/:id/offline-token', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/licenses/:id/offline-token', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const token = await licenseService.generateOfflineLicense(req.params.id);
     if (!token) {
@@ -335,7 +336,7 @@ const bulkAssignSeatsSchema = z.object({
 });
 
 // Get seat assignments for a license
-router.get('/licenses/:id/seats', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/licenses/:id/seats', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await seatService.getSeatAssignments(req.params.id);
 
@@ -356,7 +357,7 @@ router.get('/licenses/:id/seats', async (req: AuthenticatedRequest, res: Respons
 });
 
 // Assign a seat to a user
-router.post('/licenses/:id/seats', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/licenses/:id/seats', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = assignSeatSchema.parse(req.body);
 
@@ -388,7 +389,7 @@ router.post('/licenses/:id/seats', async (req: AuthenticatedRequest, res: Respon
 });
 
 // Bulk assign seats
-router.post('/licenses/:id/seats/bulk', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/licenses/:id/seats/bulk', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = bulkAssignSeatsSchema.parse(req.body);
 
@@ -445,7 +446,7 @@ router.post('/licenses/:id/seats/:email/resend', async (req: AuthenticatedReques
 });
 
 // Get desktop activations for a license
-router.get('/licenses/:id/activations', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/licenses/:id/activations', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await desktopService.listDesktopActivations(req.params.id);
     res.json(result);
@@ -456,7 +457,7 @@ router.get('/licenses/:id/activations', async (req: AuthenticatedRequest, res: R
 });
 
 // Revoke a specific activation
-router.delete('/activations/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/activations/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await desktopService.revokeActivation(req.params.id);
 
@@ -523,7 +524,7 @@ router.post('/quotes', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 // Get quote by ID
-router.get('/quotes/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/quotes/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const quote = await quoteService.getQuoteById(req.params.id);
     if (!quote) {
@@ -538,7 +539,7 @@ router.get('/quotes/:id', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 // Send quote to customer
-router.post('/quotes/:id/send', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/quotes/:id/send', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await quoteService.sendQuote(req.params.id);
 
@@ -555,7 +556,7 @@ router.post('/quotes/:id/send', async (req: AuthenticatedRequest, res: Response)
 });
 
 // Update quote status
-router.put('/quotes/:id/status', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/quotes/:id/status', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const statusSchema = z.object({
       status: z.enum(['DRAFT', 'SENT', 'VIEWED', 'ACCEPTED', 'REJECTED', 'EXPIRED']),
@@ -575,7 +576,7 @@ router.put('/quotes/:id/status', async (req: AuthenticatedRequest, res: Response
 });
 
 // Convert quote to license
-router.post('/quotes/:id/convert', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/quotes/:id/convert', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const convertSchema = z.object({
       customerId: z.string().uuid(),
@@ -605,7 +606,7 @@ router.post('/quotes/:id/convert', async (req: AuthenticatedRequest, res: Respon
 });
 
 // Duplicate quote
-router.post('/quotes/:id/duplicate', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/quotes/:id/duplicate', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const quote = await quoteService.duplicateQuote(req.params.id);
     res.status(201).json(quote);
@@ -630,7 +631,7 @@ router.get('/customers', async (_req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-router.get('/customers/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/customers/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const customer = await customerService.getCustomerById(req.params.id);
     if (!customer) {
@@ -644,7 +645,7 @@ router.get('/customers/:id', async (req: AuthenticatedRequest, res: Response) =>
   }
 });
 
-router.get('/customers/:id/licenses', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/customers/:id/licenses', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const licenses = await licenseService.getLicensesByCustomerId(req.params.id);
     res.json(licenses);
@@ -702,7 +703,7 @@ router.get('/dashboard/stats', async (_req: AuthenticatedRequest, res: Response)
 // ============================================================================
 
 // Report usage for a subscription (admin can report on behalf of customers)
-router.post('/subscriptions/:id/usage', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/subscriptions/:id/usage', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const reportUsageSchema = z.object({
       quantity: z.number().positive(),
@@ -740,7 +741,7 @@ router.post('/subscriptions/:id/usage', async (req: AuthenticatedRequest, res: R
 });
 
 // Get usage summary for a subscription
-router.get('/subscriptions/:id/usage', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/subscriptions/:id/usage', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const summary = await paymentService.getUsageSummary(req.params.id);
     if (!summary) {
@@ -755,12 +756,12 @@ router.get('/subscriptions/:id/usage', async (req: AuthenticatedRequest, res: Re
 });
 
 // Get usage records for a subscription
-router.get('/subscriptions/:id/usage/records', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/subscriptions/:id/usage/records', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const records = await paymentService.getUsageRecords(req.params.id, {
       startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
       endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+      limit: req.query.limit ? parsePositiveInt(req.query.limit as string, 100, 1000) : undefined,
     });
     res.json(records);
   } catch (error) {
@@ -774,7 +775,7 @@ router.get('/subscriptions/:id/usage/records', async (req: AuthenticatedRequest,
 // ============================================================================
 
 // Create metered price for existing product
-router.post('/products/:id/metered-price', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/products/:id/metered-price', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const meteredPriceSchema = z.object({
       unitAmount: z.number().positive(),
@@ -824,7 +825,7 @@ router.get('/tax/codes', async (_req: AuthenticatedRequest, res: Response) => {
 });
 
 // Update product tax code
-router.put('/products/:id/tax-code', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/products/:id/tax-code', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const taxCodeSchema = z.object({
       taxCode: z.string().min(1),
@@ -849,7 +850,7 @@ router.put('/products/:id/tax-code', async (req: AuthenticatedRequest, res: Resp
 });
 
 // Get Stripe pricing info for product
-router.get('/products/:id/pricing', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/products/:id/pricing', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const pricing = await productService.getStripePricingInfo(req.params.id);
     if (!pricing) {
@@ -885,7 +886,7 @@ router.get('/subscriptions', async (req: AuthenticatedRequest, res: Response) =>
 });
 
 // Get subscription by ID
-router.get('/subscriptions/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/subscriptions/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const subscription = await prisma.subscription.findUnique({
       where: { id: req.params.id },
@@ -975,7 +976,7 @@ router.post('/coupons', async (req: AuthenticatedRequest, res: Response) => {
 router.get('/coupons', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const coupons = await paymentService.listCoupons({
-      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+      limit: req.query.limit ? parsePositiveInt(req.query.limit as string, 25, 100) : undefined,
       startingAfter: req.query.startingAfter as string | undefined,
     });
     res.json(coupons);
@@ -1065,7 +1066,7 @@ router.get('/promotion-codes', async (req: AuthenticatedRequest, res: Response) 
     const promoCodes = await paymentService.listPromotionCodes({
       couponId: req.query.couponId as string | undefined,
       active: req.query.active === 'true' ? true : req.query.active === 'false' ? false : undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+      limit: req.query.limit ? parsePositiveInt(req.query.limit as string, 25, 100) : undefined,
       startingAfter: req.query.startingAfter as string | undefined,
     });
     res.json(promoCodes);
@@ -1125,6 +1126,7 @@ router.get('/promotion-codes/validate/:code', async (req: AuthenticatedRequest, 
 // Upload a bundle file for a product
 router.post(
   '/products/:id/upload',
+  validateIdParam,
   upload.single('file'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -1191,7 +1193,7 @@ router.post(
 );
 
 // List all bundles for a product
-router.get('/products/:id/bundles', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/products/:id/bundles', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!storageService.isS3Configured()) {
       res.json({ bundles: [], s3Configured: false });
@@ -1232,7 +1234,7 @@ router.get('/products/:id/bundles', async (req: AuthenticatedRequest, res: Respo
 });
 
 // Set active bundle for a product
-router.put('/products/:id/bundle', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/products/:id/bundle', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const setBundleSchema = z.object({
       s3PackageKey: z.string().min(1),
@@ -1266,7 +1268,7 @@ router.put('/products/:id/bundle', async (req: AuthenticatedRequest, res: Respon
 });
 
 // Delete a bundle file
-router.delete('/products/:id/bundles/:key(*)', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/products/:id/bundles/:key(*)', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const product = await productService.getProductById(req.params.id);
     if (!product) {

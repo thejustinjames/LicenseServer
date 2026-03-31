@@ -13,6 +13,7 @@ import { initializeConfigProvider } from './config/providers/index.js';
 import { initializeEmailService } from './services/email.service.js';
 import { initializeRedis, closeRedis, isRedisAvailable } from './config/redis.js';
 import { logger, generateRequestId } from './services/logger.service.js';
+import { requestTimeout, responseHeaders } from './middleware/timeout.js';
 
 import adminRoutes from './routes/admin.js';
 import portalRoutes from './routes/portal.js';
@@ -44,17 +45,24 @@ if (isCorsEnabled()) {
 // Cookie parser for httpOnly auth cookies
 app.use(cookieParser());
 
+// Request timeout middleware
+const timeoutMs = parseInt(config.REQUEST_TIMEOUT_MS, 10);
+app.use(requestTimeout(timeoutMs));
+
+// Standard response headers (API version, cache control)
+app.use(responseHeaders());
+
 // Request ID for correlation
 app.use((req, _res, next) => {
   req.headers['x-request-id'] = req.headers['x-request-id'] || generateRequestId();
   next();
 });
 
-// Stripe webhooks need raw body
+// Stripe webhooks need raw body (no size limit for webhook signature verification)
 app.use('/webhooks', express.raw({ type: 'application/json' }));
 
-// JSON parsing for all other routes
-app.use(express.json());
+// JSON parsing for all other routes with configurable size limit
+app.use(express.json({ limit: config.REQUEST_BODY_LIMIT }));
 
 // Routes
 app.use('/api/admin', adminRoutes);

@@ -13,6 +13,7 @@ import { Response, NextFunction } from 'express';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import type { AuthenticatedRequest } from '../types/index.js';
 import type { AuthProviderInterface, AuthUser } from './index.js';
+import { logger } from '../services/logger.service.js';
 
 interface CognitoAccessTokenPayload {
   sub: string;
@@ -150,7 +151,7 @@ export class CognitoAuthProvider implements AuthProviderInterface {
         groups,
       };
     } catch (error) {
-      console.debug('Cognito token verification failed:', error instanceof Error ? error.message : error);
+      logger.debug('Cognito token verification failed', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -178,9 +179,9 @@ export class CognitoAuthProvider implements AuthProviderInterface {
     // Hydrate the JWKS cache
     try {
       await this.verifier.hydrate();
-      console.log(`Cognito auth provider initialized for pool ${this.userPoolId}`);
+      logger.info(`Cognito auth provider initialized for pool ${this.userPoolId}`);
     } catch (error) {
-      console.error('Failed to hydrate Cognito JWKS:', error);
+      logger.error('Failed to hydrate Cognito JWKS:', error);
       throw error;
     }
 
@@ -214,7 +215,7 @@ export class CognitoAuthProvider implements AuthProviderInterface {
 
       return attributes;
     } catch (error) {
-      console.error('Failed to get Cognito user:', error);
+      logger.error('Failed to get Cognito user:', error);
       return null;
     }
   }
@@ -239,7 +240,7 @@ export class CognitoAuthProvider implements AuthProviderInterface {
 
       return response.Groups?.map(g => g.GroupName || '').filter(Boolean) || [];
     } catch (error) {
-      console.error('Failed to list user groups:', error);
+      logger.error('Failed to list user groups:', error);
       return [];
     }
   }

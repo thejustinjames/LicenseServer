@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 
 namespace LicenseClient;
 
@@ -154,6 +155,7 @@ public class LicenseClient : IDisposable
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly Platform _platform;
+    private readonly SemaphoreSlim _checkInLock = new(1, 1);
 
     public LicenseClient(LicenseClientConfig config)
     {
@@ -386,16 +388,26 @@ public class LicenseClient : IDisposable
 
     /// <summary>
     /// Perform check-in if required, otherwise return cached validation.
+    /// Thread-safe - uses lock to prevent concurrent check-ins for the same license.
     /// </summary>
     public async Task<DesktopValidationResult> ValidateWithAutoCheckInAsync(string licenseKey, CancellationToken ct = default)
     {
-        if (IsCheckInRequired(licenseKey))
+        // Use lock to prevent race condition between checking and performing check-in
+        await _checkInLock.WaitAsync(ct);
+        try
         {
-            var checkInResult = await CheckInAsync(licenseKey, ct);
-            if (checkInResult.Valid)
+            if (IsCheckInRequired(licenseKey))
             {
-                SetLastCheckInTime(licenseKey, DateTime.UtcNow);
+                var checkInResult = await CheckInAsync(licenseKey, ct);
+                if (checkInResult.Valid)
+                {
+                    SetLastCheckInTime(licenseKey, DateTime.UtcNow);
+                }
             }
+        }
+        finally
+        {
+            _checkInLock.Release();
         }
 
         return await ValidateDesktopAsync(licenseKey, ct);
@@ -764,6 +776,7 @@ public class LicenseClient : IDisposable
     public void Dispose()
     {
         _httpClient.Dispose();
+        _checkInLock.Dispose();
         GC.SuppressFinalize(this);
     }
 }

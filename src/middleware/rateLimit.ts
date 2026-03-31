@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { checkRateLimit } from '../config/redis.js';
 import { logger } from '../services/logger.service.js';
+import type { AuthenticatedRequest } from '../types/index.js';
 
 export interface RateLimitOptions {
   windowMs: number;
@@ -9,6 +10,31 @@ export interface RateLimitOptions {
   message?: string;
   skipFailedRequests?: boolean;
   skipSuccessfulRequests?: boolean;
+  /**
+   * If true, rate limit check failures will block requests (fail-closed).
+   * If false (default), requests are allowed through on error (fail-open).
+   */
+  failClosed?: boolean;
+}
+
+/**
+ * Key generator that uses user ID if authenticated, falls back to IP
+ */
+export function userOrIpKeyGenerator(req: Request): string {
+  const authReq = req as AuthenticatedRequest;
+  if (authReq.user?.id) {
+    return `user:${authReq.user.id}`;
+  }
+  return `ip:${req.ip || 'unknown'}`;
+}
+
+/**
+ * Key generator that combines user ID/IP with the route path
+ */
+export function userRouteKeyGenerator(req: Request): string {
+  const authReq = req as AuthenticatedRequest;
+  const base = authReq.user?.id ? `user:${authReq.user.id}` : `ip:${req.ip || 'unknown'}`;
+  return `${base}:${req.method}:${req.baseUrl}${req.path}`;
 }
 
 /**
@@ -21,6 +47,7 @@ export function rateLimit(options: RateLimitOptions) {
     maxRequests,
     keyGenerator = (req) => req.ip || 'unknown',
     message = 'Too many requests, please try again later',
+    failClosed = false,
   } = options;
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -46,6 +73,7 @@ export function rateLimit(options: RateLimitOptions) {
 
         res.status(429).json({
           error: message,
+          code: 'RATE_001',
           retryAfter,
         });
         return;
@@ -53,8 +81,17 @@ export function rateLimit(options: RateLimitOptions) {
 
       next();
     } catch (error) {
-      // On error, allow the request through (fail open)
-      logger.error('Rate limit check failed', error);
+      logger.error('Rate limit check failed', { error: error instanceof Error ? error.message : String(error) });
+      if (failClosed) {
+        // Block requests when rate limit check fails
+        res.status(503).json({
+          error: 'Service temporarily unavailable',
+          code: 'RATE_002',
+          retryAfter: 60,
+        });
+        return;
+      }
+      // Default: allow the request through (fail-open)
       next();
     }
   };
@@ -84,4 +121,26 @@ export const webhookRateLimit = rateLimit({
   windowMs: 60000, // 1 minute
   maxRequests: 100, // 100 requests per minute
   message: 'Too many webhook requests',
+});
+
+/**
+ * Per-user rate limiter for authenticated routes
+ * Uses user ID when authenticated, falls back to IP
+ */
+export const userRateLimit = rateLimit({
+  windowMs: 60000, // 1 minute
+  maxRequests: 120, // 120 requests per minute per user
+  keyGenerator: userOrIpKeyGenerator,
+  message: 'Too many requests',
+});
+
+/**
+ * Strict per-user rate limiter for sensitive operations
+ * Uses user ID when authenticated, falls back to IP
+ */
+export const strictUserRateLimit = rateLimit({
+  windowMs: 60000, // 1 minute
+  maxRequests: 30, // 30 requests per minute per user
+  keyGenerator: userOrIpKeyGenerator,
+  message: 'Too many requests for this operation',
 });

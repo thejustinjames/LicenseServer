@@ -123,6 +123,14 @@ export class LicenseClient {
         }),
       });
 
+      // Check HTTP status before parsing JSON
+      if (!response.ok) {
+        return {
+          valid: false,
+          error: `Server error: ${response.status} ${response.statusText}`,
+        };
+      }
+
       const result = (await response.json()) as ValidationResult;
 
       if (result.valid) {
@@ -159,6 +167,14 @@ export class LicenseClient {
         }),
       });
 
+      // Check HTTP status before parsing JSON
+      if (!response.ok) {
+        return {
+          success: false,
+          error: `Server error: ${response.status} ${response.statusText}`,
+        };
+      }
+
       const result = (await response.json()) as ActivationResult;
 
       if (result.success) {
@@ -188,6 +204,14 @@ export class LicenseClient {
           machineFingerprint: this.machineFingerprint,
         }),
       });
+
+      // Check HTTP status before parsing JSON
+      if (!response.ok) {
+        return {
+          success: false,
+          error: `Server error: ${response.status} ${response.statusText}`,
+        };
+      }
 
       const result = (await response.json()) as { success: boolean; error?: string };
 

@@ -119,9 +119,11 @@ public final class LicenseClient: @unchecked Sendable {
 
         if let cacheDir = config.cacheDirectory {
             self.cacheDirectory = cacheDir
-        } else {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        } else if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             self.cacheDirectory = appSupport.appendingPathComponent("LicenseCache", isDirectory: true)
+        } else {
+            // Fallback to temp directory if application support is unavailable
+            self.cacheDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("LicenseCache", isDirectory: true)
         }
 
         // Create cache directory
@@ -266,7 +268,11 @@ public final class LicenseClient: @unchecked Sendable {
     }
 
     private func performDesktopValidation(licenseKey: String) async throws -> DesktopValidationResult {
-        var request = URLRequest(url: URL(string: "\(config.serverUrl)/api/v1/desktop/validate")!)
+        guard let url = URL(string: "\(config.serverUrl)/api/v1/desktop/validate") else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -283,7 +289,13 @@ public final class LicenseClient: @unchecked Sendable {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+
+        // Validate HTTP response status
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+
         return try JSONDecoder().decode(DesktopValidationResult.self, from: data)
     }
 
@@ -293,7 +305,17 @@ public final class LicenseClient: @unchecked Sendable {
     /// Should be called every checkInDays to renew the offline token.
     public func checkIn(licenseKey: String) async -> CheckInResult {
         do {
-            var request = URLRequest(url: URL(string: "\(config.serverUrl)/api/v1/desktop/checkin")!)
+            guard let url = URL(string: "\(config.serverUrl)/api/v1/desktop/checkin") else {
+                return CheckInResult(
+                    valid: false,
+                    error: "Invalid server URL",
+                    renewedToken: nil,
+                    message: nil,
+                    nextCheckIn: nil
+                )
+            }
+
+            var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -309,7 +331,19 @@ public final class LicenseClient: @unchecked Sendable {
 
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-            let (data, _) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request)
+
+            // Validate HTTP response status
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                return CheckInResult(
+                    valid: false,
+                    error: "Server error: \(httpResponse.statusCode)",
+                    renewedToken: nil,
+                    message: nil,
+                    nextCheckIn: nil
+                )
+            }
+
             let result = try JSONDecoder().decode(CheckInResult.self, from: data)
 
             if result.valid, let renewedToken = result.renewedToken {
@@ -386,7 +420,11 @@ public final class LicenseClient: @unchecked Sendable {
     }
 
     private func performValidation(licenseKey: String) async throws -> ValidationResult {
-        var request = URLRequest(url: URL(string: "\(config.serverUrl)/api/v1/validate")!)
+        guard let url = URL(string: "\(config.serverUrl)/api/v1/validate") else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -401,7 +439,13 @@ public final class LicenseClient: @unchecked Sendable {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+
+        // Validate HTTP response status
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+
         return try JSONDecoder().decode(ValidationResult.self, from: data)
     }
 
@@ -409,7 +453,15 @@ public final class LicenseClient: @unchecked Sendable {
 
     public func activate(licenseKey: String, machineName: String? = nil) async -> ActivationResult {
         do {
-            var request = URLRequest(url: URL(string: "\(config.serverUrl)/api/v1/activate")!)
+            guard let url = URL(string: "\(config.serverUrl)/api/v1/activate") else {
+                return ActivationResult(
+                    success: false,
+                    error: "Invalid server URL",
+                    activation: nil
+                )
+            }
+
+            var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -421,7 +473,17 @@ public final class LicenseClient: @unchecked Sendable {
 
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-            let (data, _) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request)
+
+            // Validate HTTP response status
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                return ActivationResult(
+                    success: false,
+                    error: "Server error: \(httpResponse.statusCode)",
+                    activation: nil
+                )
+            }
+
             let result = try JSONDecoder().decode(ActivationResult.self, from: data)
 
             if result.success {
@@ -447,7 +509,11 @@ public final class LicenseClient: @unchecked Sendable {
 
     public func deactivate(licenseKey: String) async -> (success: Bool, error: String?) {
         do {
-            var request = URLRequest(url: URL(string: "\(config.serverUrl)/api/v1/deactivate")!)
+            guard let url = URL(string: "\(config.serverUrl)/api/v1/deactivate") else {
+                return (false, "Invalid server URL")
+            }
+
+            var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -458,7 +524,12 @@ public final class LicenseClient: @unchecked Sendable {
 
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-            let (data, _) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request)
+
+            // Validate HTTP response status
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                return (false, "Server error: \(httpResponse.statusCode)")
+            }
 
             struct Response: Codable {
                 let success: Bool
@@ -642,7 +713,7 @@ public final class LicenseClient: @unchecked Sendable {
     }
 
     private func updateCachedOfflineToken(licenseKey: String, offlineToken: String) {
-        guard var cached = getCachedDesktopValidation(licenseKey: licenseKey) else { return }
+        guard let cached = getCachedDesktopValidation(licenseKey: licenseKey) else { return }
 
         // Create updated result with new token
         let updated = DesktopValidationResult(

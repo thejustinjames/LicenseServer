@@ -22,6 +22,7 @@ import {
 import type { AwsCredentialIdentityProvider } from '@aws-sdk/types';
 import { S3Client } from '@aws-sdk/client-s3';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import { logger } from '../services/logger.service.js';
 
 /**
  * Detect the runtime environment
@@ -62,14 +63,14 @@ export function getAWSCredentials(): AwsCredentialIdentityProvider | undefined {
 
   // If explicit credentials are provided, use them
   if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-    console.debug('Using explicit AWS credentials from environment');
+    logger.debug('Using explicit AWS credentials from environment');
     return fromEnv();
   }
 
   switch (env) {
     case 'eks':
       // EKS with IRSA - use web identity token
-      console.debug('Using EKS IRSA credentials');
+      logger.debug('Using EKS IRSA credentials');
       return fromTokenFile({
         roleArn: process.env.AWS_ROLE_ARN,
         webIdentityTokenFile: process.env.AWS_WEB_IDENTITY_TOKEN_FILE,
@@ -77,12 +78,12 @@ export function getAWSCredentials(): AwsCredentialIdentityProvider | undefined {
 
     case 'ecs':
       // ECS Task Role or EC2 Instance Profile
-      console.debug('Using ECS/EC2 container credentials');
+      logger.debug('Using ECS/EC2 container credentials');
       return fromContainerMetadata();
 
     case 'ec2':
       // EC2 Instance Profile (via IMDS)
-      console.debug('Using EC2 instance profile credentials');
+      logger.debug('Using EC2 instance profile credentials');
       return fromContainerMetadata({
         timeout: 1000,
         maxRetries: 1,
@@ -90,18 +91,18 @@ export function getAWSCredentials(): AwsCredentialIdentityProvider | undefined {
 
     case 'lambda':
       // Lambda uses environment credentials automatically
-      console.debug('Using Lambda execution role credentials');
+      logger.debug('Using Lambda execution role credentials');
       return undefined; // SDK handles this automatically
 
     case 'local':
     default:
       // Local development - try AWS CLI config
       if (process.env.AWS_PROFILE) {
-        console.debug(`Using AWS profile: ${process.env.AWS_PROFILE}`);
+        logger.debug(`Using AWS profile: ${process.env.AWS_PROFILE}`);
         return fromIni({ profile: process.env.AWS_PROFILE });
       }
       // Return undefined to let SDK use default credential chain
-      console.debug('Using default AWS credential chain');
+      logger.debug('Using default AWS credential chain');
       return undefined;
   }
 }
@@ -128,7 +129,7 @@ export function createS3Client(): S3Client {
 
   // For MinIO or other S3-compatible storage
   if (endpoint) {
-    console.debug(`Using custom S3 endpoint: ${endpoint}`);
+    logger.debug(`Using custom S3 endpoint: ${endpoint}`);
     config.endpoint = endpoint;
     config.forcePathStyle = forcePathStyle;
   }

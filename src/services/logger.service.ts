@@ -1,6 +1,7 @@
 import pino from 'pino';
 
 const isProduction = process.env.NODE_ENV === 'production';
+// LOG_LEVEL is validated by config schema, defaults to 'info'
 const logLevel = process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug');
 
 // Create base logger

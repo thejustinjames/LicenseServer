@@ -294,7 +294,7 @@ resource "aws_iam_role_policy_attachment" "license_server" {
 
 resource "aws_ecr_repository" "license_server" {
   name                 = "ag-license-server"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true

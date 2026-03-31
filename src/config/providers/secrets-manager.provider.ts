@@ -17,6 +17,7 @@ import {
 } from '@aws-sdk/client-secrets-manager';
 import { getAWSCredentials } from '../aws.js';
 import type { ConfigProviderInterface } from './index.js';
+import { logger } from '../../services/logger.service.js';
 
 interface CachedSecret {
   value: string;
@@ -87,9 +88,9 @@ export class SecretsManagerConfigProvider implements ConfigProviderInterface {
     } catch (error) {
       if (error instanceof ResourceNotFoundException) {
         // Secret not found, fall back to environment variable
-        console.debug(`Secret ${key} not found in Secrets Manager, using env var`);
+        logger.debug(`Secret ${key} not found in Secrets Manager, using env var`);
       } else {
-        console.warn(`Error fetching secret ${key}:`, error instanceof Error ? error.message : error);
+        logger.warn(`Error fetching secret ${key}`, { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -119,9 +120,9 @@ export class SecretsManagerConfigProvider implements ConfigProviderInterface {
     try {
       // Just create the client to verify credentials
       this.getClient();
-      console.log('Secrets Manager provider initialized');
+      logger.info('Secrets Manager provider initialized');
     } catch (error) {
-      console.error('Failed to initialize Secrets Manager provider:', error);
+      logger.error('Failed to initialize Secrets Manager provider:', error);
       throw error;
     }
 
