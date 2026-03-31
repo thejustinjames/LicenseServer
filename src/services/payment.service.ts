@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { stripe } from '../config/stripe.js';
 import { prisma } from '../config/database.js';
 import { config } from '../config/index.js';
@@ -230,7 +231,9 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
     }
 
     if (!customer) {
-      const tempPassword = crypto.randomUUID();
+      // Generate a secure temporary password that meets password requirements
+      const randomHex = crypto.randomBytes(12).toString('hex');
+      const tempPassword = `T${randomHex.substring(0, 11)}1!`;
       const bcrypt = await import('bcrypt');
       const passwordHash = await bcrypt.hash(tempPassword, 12);
 
@@ -583,12 +586,13 @@ export async function reportUsage(input: ReportUsageInput): Promise<{ success: b
   // Get the subscription from Stripe to find the subscription item
   const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
 
-  if (!stripeSubscription.items.data.length) {
+  const subscriptionItem = stripeSubscription.items.data[0];
+  if (!subscriptionItem) {
     return { success: false, error: 'No subscription items found' };
   }
 
   // Get the first subscription item (assumes single product subscription)
-  const subscriptionItemId = stripeSubscription.items.data[0].id;
+  const subscriptionItemId = subscriptionItem.id;
 
   // Generate idempotency key if not provided
   const idempotencyKey = input.idempotencyKey ||
@@ -685,11 +689,10 @@ export async function getUsageSummary(subscriptionId: string): Promise<{
 
   const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
 
-  if (!stripeSubscription.items.data.length) {
+  const subscriptionItem = stripeSubscription.items.data[0];
+  if (!subscriptionItem) {
     return null;
   }
-
-  const subscriptionItem = stripeSubscription.items.data[0];
 
   // Get usage record summaries from Stripe
   const summaries = await stripe.subscriptionItems.listUsageRecordSummaries(

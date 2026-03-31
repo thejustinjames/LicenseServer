@@ -258,7 +258,10 @@ export async function createOrGetCustomerByEmail(email: string, name?: string): 
     logger.warn('Failed to create Stripe customer', { error: error instanceof Error ? error.message : String(error) });
   }
 
-  const temporaryPassword = crypto.randomUUID();
+  // Generate a secure temporary password that meets password requirements
+  // Format: Uppercase + hex + number + special char
+  const randomHex = crypto.randomBytes(12).toString('hex');
+  const temporaryPassword = `T${randomHex.substring(0, 11)}1!`;
   const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
 
   customer = await prisma.customer.create({

@@ -431,6 +431,68 @@ This connects to:
 | k8inspector Integration | SGD 490/year | Kubernetes inspection for SILO |
 | Docker Monitor | SGD 290/year | Container monitoring and security |
 
+## Development Status
+
+### Build Status
+- **Build**: PASSING
+- **Tests**: 26/26 PASSING
+- **SDKs**: All compiling (Node, Swift, Rust, C#)
+
+### Completed (2026-03-31) - Codebase Audit & Fixes
+
+#### Critical Fixes (7)
+- [x] `payment.service.ts`: Fixed empty customerId creating orphaned subscription records
+- [x] `payment.service.ts`: Wrapped checkout handler in $transaction for atomicity
+- [x] `seat.service.ts`: Fixed race condition in seat assignment using atomic transactions
+- [x] `clients/node`: Added HTTP response status validation before JSON parsing
+- [x] `clients/swift`: Replaced force unwraps (!) with guard let, added HTTP status checks
+- [x] `clients/rust`: Fixed memory leak (removed String::leak), replaced panics with fallbacks
+- [x] `clients/csharp`: Added SemaphoreSlim to fix race condition in auto check-in
+
+#### High Priority Fixes (18+)
+- [x] Replaced ~120 console.* calls with structured pino logger
+- [x] CORS hardened - requires explicit origins in production (no wildcard)
+- [x] NetworkPolicy restricted from 0.0.0.0/0 to RFC1918 private ranges
+- [x] UUID validation middleware for all admin routes with :id parameters
+- [x] Query parameter bounds checking (limit/offset validation)
+
+#### Medium Priority Fixes (22)
+- [x] ECR image_tag_mutability changed to IMMUTABLE
+- [x] Rate limiting fail-closed option added
+- [x] UUID validation on quotes, customers, subscriptions, activations routes
+- [x] formatFileSize array bounds fix (handles TB+ files)
+- [x] Secure password generation (replaced UUID with compliant format)
+- [x] Unsafe array access fixes in Stripe subscription handling
+
+#### Low Priority Fixes (8)
+- [x] Standardized error response format with error codes (`src/utils/errors.ts`)
+- [x] Request timeout middleware (configurable, default 30s)
+- [x] API version header (X-API-Version)
+- [x] Per-user rate limiting support (userRateLimit, strictUserRateLimit)
+- [x] Refresh token rotation with 30-day expiry
+- [x] Database connection pool documentation
+- [x] API deprecation utilities (`src/middleware/deprecation.ts`)
+- [x] Config schema additions (LOG_LEVEL, REQUEST_TIMEOUT_MS, REQUEST_BODY_LIMIT)
+
+### TODO - Before Production
+
+#### High Priority
+- [ ] Configure live Stripe account (switch from test mode)
+- [ ] Set up Stripe webhook endpoint: `https://licencing.agencio.cloud/webhooks/stripe`
+- [ ] Sync products to live Stripe
+- [ ] Integration tests (only unit tests exist)
+- [ ] SECURITY.md documentation
+
+#### Medium Priority
+- [ ] Desktop offline check-in completion
+- [ ] Job queue for emails (currently fire-and-forget)
+- [ ] Social login backend (UI buttons exist, no backend)
+
+#### Low Priority (Post-Beta)
+- [ ] CSRF tokens for form submissions
+- [ ] Feature flags system
+- [ ] API versioning (v2 routes)
+
 ## Security Considerations
 
 - All admin routes require JWT authentication with admin role
@@ -442,6 +504,10 @@ This connects to:
 - Machine fingerprinting prevents license sharing
 - Constant-time password comparison prevents timing attacks
 - Generic error messages prevent information disclosure
+- Per-user rate limiting available for authenticated routes
+- Refresh token rotation with automatic blacklisting
+- Request timeout protection (default 30s)
+- Configurable request body size limits
 
 For a comprehensive security overview, audit results, and deployment checklist, see [docs/SECURITY.md](docs/SECURITY.md).
 
