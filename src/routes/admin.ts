@@ -12,6 +12,8 @@ import * as storageService from '../services/storage.service.js';
 import * as seatService from '../services/seat.service.js';
 import * as quoteService from '../services/quote.service.js';
 import * as desktopService from '../services/desktop.service.js';
+import * as crlService from '../services/crl.service.js';
+import { isMtlsCaEnabled } from '../services/ca.service.js';
 import { prisma } from '../config/database.js';
 import { logger } from '../services/logger.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
@@ -1294,6 +1296,41 @@ router.delete('/products/:id/bundles/:key(*)', validateIdParam, async (req: Auth
   } catch (error) {
     logger.error('Delete bundle error:', error);
     res.status(500).json({ error: 'Failed to delete bundle' });
+  }
+});
+
+// Agent certificate management (mTLS) — admin-only.
+router.get('/agents/certificates', authenticate, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const limit = parsePositiveInt(req.query.limit as string | undefined, 100, 500);
+    const certs = await prisma.agentCertificate.findMany({
+      orderBy: { issuedAt: 'desc' },
+      take: limit,
+    });
+    res.json({ certificates: certs });
+  } catch (error) {
+    logger.error('List agent certificates error:', error);
+    res.status(500).json({ error: 'List failed' });
+  }
+});
+
+router.post('/agents/certificates/:serial/revoke', authenticate, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!isMtlsCaEnabled()) {
+      res.status(503).json({ error: 'mTLS agent CA is disabled on this deployment' });
+      return;
+    }
+    const serial = sanitizeString(req.params.serial, 64);
+    const reason = sanitizeString(typeof req.body?.reason === 'string' ? req.body.reason : '', 256);
+    const result = await crlService.revokeAgentCertificate(serial, reason || undefined);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    logger.error('Revoke agent cert error:', error);
+    if ((error as { code?: string }).code === 'P2025') {
+      res.status(404).json({ error: 'Certificate not found' });
+      return;
+    }
+    res.status(500).json({ error: 'Revocation failed' });
   }
 });
 

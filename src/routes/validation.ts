@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { validationRateLimit } from '../middleware/rateLimit.js';
 import * as licenseService from '../services/license.service.js';
 import * as agentService from '../services/agent.service.js';
+import * as crlService from '../services/crl.service.js';
+import { isMtlsCaEnabled } from '../services/ca.service.js';
 import { getPublicKey } from '../utils/crypto.js';
 import { logger } from '../services/logger.service.js';
 
@@ -141,6 +143,27 @@ router.post('/agents/enroll', async (req: Request, res: Response) => {
     }
     logger.error('Agent enrollment error:', error);
     res.status(500).json({ error: 'Agent enrollment failed' });
+  }
+});
+
+// CRL endpoint — fetched periodically by Cortex. Public on purpose: a CRL
+// is signed by the CA and reveals only revoked serials, no secrets.
+// Returns 503 when MTLS_AGENT_CA_ENABLED is off.
+router.get('/agents/crl', async (_req: Request, res: Response) => {
+  try {
+    if (!isMtlsCaEnabled()) {
+      res.status(503).json({ error: 'mTLS agent CRL is disabled on this deployment' });
+      return;
+    }
+    const bundle = await crlService.buildCRL();
+    res.set('Content-Type', 'application/x-pem-file');
+    res.set('Cache-Control', `public, max-age=${Math.floor((bundle.nextUpdate.getTime() - Date.now()) / 1000)}`);
+    res.set('X-CRL-Revoked-Count', String(bundle.revokedCount));
+    res.set('X-CRL-Next-Update', bundle.nextUpdate.toISOString());
+    res.send(bundle.crlPem);
+  } catch (error) {
+    logger.error('CRL build error:', error);
+    res.status(500).json({ error: 'CRL build failed' });
   }
 });
 
