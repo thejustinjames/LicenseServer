@@ -61,10 +61,15 @@ spec:
               containerPort: 3030
               protocol: TCP
 
-          # Environment from ConfigMap
+          # Environment from ConfigMap + bootstrap Secret. The Secret mirrors
+          # AWS Secrets Manager (the source of truth) and is required at
+          # container start so Prisma can read DATABASE_URL before
+          # bootstrap.mjs runs.
           envFrom:
             - configMapRef:
                 name: license-server-config
+            - secretRef:
+                name: license-server-secret
 
           # Additional environment variables
           env:
