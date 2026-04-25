@@ -117,7 +117,20 @@ const createLicenseSchema = z.object({
   productId: z.string().uuid(),
   expiresAt: z.string().datetime().optional(),
   maxActivations: z.number().positive().optional(),
+  seatCount: z.number().int().positive().max(10000).optional(),
   metadata: z.any().optional(),
+});
+
+// One-click test-license issuance: pick a product, get a key. The endpoint
+// auto-creates a "qa-tester@licenseserver.test" customer on first call, tags
+// the license `metadata.test = true`, and defaults seat count from the
+// product so cortex SKUs come out with their full seat allocation.
+const issueTestLicenseSchema = z.object({
+  productId: z.string().uuid(),
+  seatCount: z.number().int().positive().max(10000).optional(),
+  expiresInDays: z.number().int().positive().max(3650).optional(),
+  customerEmail: z.string().email().optional(),
+  note: z.string().max(200).optional(),
 });
 
 const updateLicenseSchema = z.object({
@@ -227,6 +240,98 @@ router.post('/licenses', async (req: AuthenticatedRequest, res: Response) => {
     }
     logger.error('Create license error:', error);
     res.status(500).json({ error: 'Failed to create license' });
+  }
+});
+
+/**
+ * POST /api/admin/licenses/test
+ *
+ * One-click test-license issuance for QA. Bypasses Stripe entirely:
+ *  - auto-creates (or reuses) a "qa-tester@licenseserver.test" customer
+ *    unless `customerEmail` is provided
+ *  - tags `metadata.test = true` plus the issuing admin's email + timestamp
+ *    so test licences are filterable / cleanable later
+ *  - defaults `seatCount` to the product's `defaultSeatCount` (so Cortex
+ *    Business issues with 5 seats, Enterprise with 10) unless overridden
+ *  - optional `expiresInDays` to time-box the license
+ *
+ * Returns the full license + key in the response.
+ */
+router.post('/licenses/test', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = issueTestLicenseSchema.parse(req.body);
+    const issuedBy = req.user?.email || 'unknown';
+
+    const product = await productService.getProductById(data.productId);
+    if (!product) {
+      res.status(404).json({ error: 'Product not found' });
+      return;
+    }
+
+    // Resolve / create the test customer.
+    const testEmail = (data.customerEmail || 'qa-tester@licenseserver.test').toLowerCase();
+    let customer = await prisma.customer.findUnique({ where: { email: testEmail } });
+    if (!customer) {
+      const { randomBytes } = await import('crypto');
+      const sentinel = 'cognito:' + randomBytes(32).toString('hex');
+      const bcrypt = await import('bcrypt');
+      customer = await prisma.customer.create({
+        data: {
+          email: testEmail,
+          // Cognito-managed customers carry an unmatchable password hash;
+          // we mimic that for the QA tester so the legacy bcrypt login
+          // path can never authenticate this account.
+          passwordHash: await bcrypt.hash(sentinel, 4),
+          name: 'QA Tester',
+          isAdmin: false,
+        },
+      });
+      logger.audit('test-customer-create', {
+        success: true,
+        details: { email: testEmail, issuedBy },
+      });
+    }
+
+    const expiresAt = data.expiresInDays
+      ? new Date(Date.now() + data.expiresInDays * 24 * 60 * 60 * 1000)
+      : undefined;
+
+    const license = await licenseService.createLicense({
+      customerId: customer.id,
+      productId: data.productId,
+      seatCount: data.seatCount,
+      expiresAt,
+      metadata: {
+        test: true,
+        issuedBy,
+        issuedAt: new Date().toISOString(),
+        note: data.note,
+      },
+    });
+
+    logger.audit('test-license-issue', {
+      success: true,
+      details: {
+        licenseId: license.id,
+        productId: data.productId,
+        productName: product.name,
+        customerEmail: testEmail,
+        issuedBy,
+      },
+    });
+
+    res.status(201).json({
+      license,
+      product: { id: product.id, name: product.name },
+      customer: { id: customer.id, email: customer.email },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Issue test license error:', error);
+    res.status(500).json({ error: 'Failed to issue test license' });
   }
 });
 

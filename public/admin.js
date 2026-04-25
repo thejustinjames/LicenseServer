@@ -74,6 +74,23 @@ function bindEvents() {
   document.getElementById('cancelLicenseBtn').addEventListener('click', closeLicenseModal);
   document.getElementById('licenseForm').addEventListener('submit', handleLicenseSubmit);
 
+  // Test license modal (no-Stripe issuance)
+  document.getElementById('testLicenseBtn').addEventListener('click', openTestLicenseModal);
+  document.getElementById('closeTestLicenseModal').addEventListener('click', closeTestLicenseModal);
+  document.getElementById('cancelTestLicenseBtn').addEventListener('click', closeTestLicenseModal);
+  document.getElementById('testLicenseForm').addEventListener('submit', handleTestLicenseSubmit);
+  document.getElementById('testLicenseModal').addEventListener('click', function (e) {
+    if (e.target === this) closeTestLicenseModal();
+  });
+
+  // License result modal (shows the issued key with a copy button)
+  document.getElementById('closeLicenseResultModal').addEventListener('click', closeLicenseResultModal);
+  document.getElementById('closeLicenseResultBtn').addEventListener('click', closeLicenseResultModal);
+  document.getElementById('copyLicenseKeyBtn').addEventListener('click', copyLicenseKey);
+  document.getElementById('licenseResultModal').addEventListener('click', function (e) {
+    if (e.target === this) closeLicenseResultModal();
+  });
+
   // Close modals on outside click
   document.getElementById('productModal').addEventListener('click', function(e) {
     if (e.target === this) closeProductModal();
@@ -708,20 +725,105 @@ function handleLicenseSubmit(e) {
     maxActivations: parseInt(document.getElementById('licenseMaxActivations').value) || 1
   };
 
+  var seats = parseInt(document.getElementById('licenseSeatCount').value);
+  if (seats > 0) data.seatCount = seats;
+
   var expiry = document.getElementById('licenseExpiry').value;
   if (expiry) {
     data.expiresAt = new Date(expiry).toISOString();
   }
 
   api('/api/admin/licenses', { method: 'POST', body: JSON.stringify(data) })
-    .then(function(license) {
+    .then(function (license) {
       closeLicenseModal();
       loadLicenses();
-      alert('License created: ' + license.key);
+      showLicenseResult(license, null, null);
     })
-    .catch(function(error) {
+    .catch(function (error) {
       alert('Failed to create license: ' + error.message);
     });
+}
+
+// --- Test license (no-Stripe) ---
+function openTestLicenseModal() {
+  document.getElementById('testLicenseModal').classList.add('active');
+  document.getElementById('testLicenseForm').reset();
+  var sel = document.getElementById('testLicenseProduct');
+  sel.innerHTML = '<option value="">Select a product...</option>';
+  for (var i = 0; i < products.length; i++) {
+    var p = products[i];
+    var label = p.name +
+      (p.priceAnnual ? '  ($' + (p.priceAnnual / 100).toFixed(2) + '/yr)' : '') +
+      '  [' + (p.platforms || []).join(',') + ']';
+    sel.innerHTML += '<option value="' + p.id + '">' + escapeHtml(label) + '</option>';
+  }
+}
+
+function closeTestLicenseModal() {
+  document.getElementById('testLicenseModal').classList.remove('active');
+}
+
+function handleTestLicenseSubmit(e) {
+  e.preventDefault();
+  var body = {
+    productId: document.getElementById('testLicenseProduct').value
+  };
+  var seats = parseInt(document.getElementById('testLicenseSeatCount').value);
+  if (seats > 0) body.seatCount = seats;
+  var days = parseInt(document.getElementById('testLicenseExpiresInDays').value);
+  if (days > 0) body.expiresInDays = days;
+  var email = document.getElementById('testLicenseCustomerEmail').value.trim();
+  if (email) body.customerEmail = email;
+  var note = document.getElementById('testLicenseNote').value.trim();
+  if (note) body.note = note;
+
+  api('/api/admin/licenses/test', { method: 'POST', body: JSON.stringify(body) })
+    .then(function (resp) {
+      closeTestLicenseModal();
+      loadLicenses();
+      showLicenseResult(resp.license, resp.product, resp.customer);
+    })
+    .catch(function (error) {
+      alert('Failed to issue test license: ' + error.message);
+    });
+}
+
+// --- Result modal (copyable key) ---
+function showLicenseResult(license, product, customer) {
+  document.getElementById('licenseResultKey').value = license.key;
+  var bits = [];
+  if (product) bits.push(product.name);
+  if (customer) bits.push('issued to ' + customer.email);
+  bits.push('seats=' + (license.seatCount || 1));
+  bits.push('maxActivations=' + (license.maxActivations || 1));
+  if (license.expiresAt) bits.push('expires ' + new Date(license.expiresAt).toISOString().split('T')[0]);
+  document.getElementById('licenseResultMeta').textContent = bits.join('  ·  ');
+  document.getElementById('licenseResultModal').classList.add('active');
+}
+
+function closeLicenseResultModal() {
+  document.getElementById('licenseResultModal').classList.remove('active');
+}
+
+function copyLicenseKey() {
+  var input = document.getElementById('licenseResultKey');
+  input.select();
+  input.setSelectionRange(0, 99999);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).then(function () {
+      flashCopyOk();
+    });
+  } else {
+    document.execCommand('copy');
+    flashCopyOk();
+  }
+}
+
+function flashCopyOk() {
+  var btn = document.getElementById('copyLicenseKeyBtn');
+  var prev = btn.textContent;
+  btn.textContent = 'Copied!';
+  setTimeout(function () { btn.textContent = prev; }, 1200);
 }
 
 // License Actions

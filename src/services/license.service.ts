@@ -11,6 +11,8 @@ export interface CreateLicenseInput {
   productId: string;
   expiresAt?: Date;
   maxActivations?: number;
+  /** Total seats for team/enterprise licences. Defaults to product.defaultSeatCount when omitted. */
+  seatCount?: number;
   metadata?: Prisma.InputJsonValue;
 }
 
@@ -30,6 +32,18 @@ export interface LicenseWithRelations extends License {
 export async function createLicense(input: CreateLicenseInput): Promise<License> {
   const key = generateLicenseKey();
 
+  // If the caller didn't specify seat count, pull the product's default so
+  // team/enterprise SKUs (e.g. Cortex Business=5, Enterprise=10) issue with
+  // their advertised capacity.
+  let seatCount = input.seatCount;
+  if (seatCount === undefined) {
+    const product = await prisma.product.findUnique({
+      where: { id: input.productId },
+      select: { defaultSeatCount: true },
+    });
+    seatCount = product?.defaultSeatCount ?? 1;
+  }
+
   return prisma.license.create({
     data: {
       key,
@@ -37,6 +51,7 @@ export async function createLicense(input: CreateLicenseInput): Promise<License>
       productId: input.productId,
       expiresAt: input.expiresAt,
       maxActivations: input.maxActivations || 1,
+      seatCount,
       metadata: input.metadata,
     },
   });
