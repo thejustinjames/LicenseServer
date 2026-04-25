@@ -53,12 +53,25 @@ const spec = {
   'SILO Cortex Enterprise':       { customer: 'enterprise', maxActivations: 2, seatCount: 10 },
 };
 
-// 32-char alphanumeric key in 4×8 groups, matches the validateLicenseKeyFormat regex.
+// Match the real key format from src/utils/license-key.ts: four 4-char
+// segments, last segment ends in a 2-char SHA-256 checksum so
+// validateLicenseKeyFormat() accepts it.
+const KEY_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function genSegment() {
+  const bytes = crypto.randomBytes(4);
+  let s = '';
+  for (let i = 0; i < 4; i++) s += KEY_CHARSET[bytes[i] % KEY_CHARSET.length];
+  return s;
+}
+function checksumOf(segments) {
+  const hash = crypto.createHash('sha256').update(segments.join('')).digest();
+  return KEY_CHARSET[hash[0] % KEY_CHARSET.length] + KEY_CHARSET[hash[1] % KEY_CHARSET.length];
+}
 function generateLicenseKey() {
-  const bytes = crypto.randomBytes(20);
-  const b32 = bytes.toString('base64').replace(/[^A-Z0-9]/gi, '').toUpperCase();
-  const padded = (b32 + 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA').slice(0, 32);
-  return padded.match(/.{8}/g).join('-');
+  const segments = [genSegment(), genSegment(), genSegment()];
+  const last = genSegment().slice(0, 2) + checksumOf(segments);
+  segments.push(last);
+  return segments.join('-');
 }
 
 async function ensureCustomer(def) {
@@ -82,7 +95,7 @@ async function ensureCustomer(def) {
   const productNames = Object.keys(spec);
   const products = await p.product.findMany({
     where: { name: { in: productNames } },
-    select: { id: true, name: true, defaultSeatCount: true, features: true },
+    select: { id: true, name: true, defaultSeatCount: true, features: true, components: true },
   });
   const missing = productNames.filter(
     (n) => !products.find((x) => x.name === n),
@@ -111,6 +124,7 @@ async function ensureCustomer(def) {
         activations: s.maxActivations,
         seats: s.seatCount,
         enterpriseModules: product.features.includes('enterprise-plugins'),
+        components: product.components || [],
       },
     };
 
@@ -136,7 +150,8 @@ async function ensureCustomer(def) {
         '\n         customer:      ' + cust.email +
         '\n         maxActivations:' + updated.maxActivations +
         '\n         seatCount:     ' + updated.seatCount +
-        '\n         enterprise:    ' + (meta.enforces.enterpriseModules ? 'YES' : 'no') + '\n',
+        '\n         enterprise:    ' + (meta.enforces.enterpriseModules ? 'YES' : 'no') +
+        '\n         components:    [' + (product.components || []).join(', ') + ']\n',
       );
     } else {
       const key = generateLicenseKey();
@@ -156,7 +171,8 @@ async function ensureCustomer(def) {
         '\n         customer:      ' + cust.email +
         '\n         maxActivations:' + created.maxActivations +
         '\n         seatCount:     ' + created.seatCount +
-        '\n         enterprise:    ' + (meta.enforces.enterpriseModules ? 'YES' : 'no') + '\n',
+        '\n         enterprise:    ' + (meta.enforces.enterpriseModules ? 'YES' : 'no') +
+        '\n         components:    [' + (product.components || []).join(', ') + ']\n',
       );
     }
   }

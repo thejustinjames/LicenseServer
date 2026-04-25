@@ -78,6 +78,8 @@ const createProductSchema = z.object({
   s3PackageKey: z.string().optional(),
   version: z.string().optional(),
   features: z.array(z.string()).optional(),
+  // Deployable components this SKU includes (e.g. ["core","cortex","dashboard","ml","dist"]).
+  components: z.array(z.string()).optional(),
   createStripeProduct: z.boolean().optional(),
   // Monthly price in cents
   stripePriceAmount: z.number().positive().optional(),
@@ -107,6 +109,8 @@ const updateProductSchema = z.object({
   s3PackageKey: z.string().optional(),
   version: z.string().optional(),
   features: z.array(z.string()).optional(),
+  // Deployable components this SKU includes (e.g. ["core","cortex","dashboard","ml","dist"]).
+  components: z.array(z.string()).optional(),
   priceMonthly: z.number().nonnegative().nullable().optional(),
   priceAnnual: z.number().nonnegative().nullable().optional(),
 });
@@ -118,6 +122,8 @@ const createLicenseSchema = z.object({
   expiresAt: z.string().datetime().optional(),
   maxActivations: z.number().positive().optional(),
   seatCount: z.number().int().positive().max(10000).optional(),
+  // Per-license narrowing of the product's components. Empty/omitted = inherit.
+  enabledComponents: z.array(z.string()).optional(),
   metadata: z.any().optional(),
 });
 
@@ -130,6 +136,9 @@ const issueTestLicenseSchema = z.object({
   seatCount: z.number().int().positive().max(10000).optional(),
   expiresInDays: z.number().int().positive().max(3650).optional(),
   customerEmail: z.string().email().optional(),
+  // Comma-or-array list of components to enable on this test license.
+  // Useful for QA flows that only need to spin up `cortex` + `dashboard`.
+  enabledComponents: z.array(z.string()).optional(),
   note: z.string().max(200).optional(),
 });
 
@@ -300,6 +309,7 @@ router.post('/licenses/test', async (req: AuthenticatedRequest, res: Response) =
       customerId: customer.id,
       productId: data.productId,
       seatCount: data.seatCount,
+      enabledComponents: data.enabledComponents,
       expiresAt,
       metadata: {
         test: true,

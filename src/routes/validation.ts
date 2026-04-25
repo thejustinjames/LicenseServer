@@ -16,6 +16,10 @@ const validateSchema = z.object({
   licenseKey: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
   machineFingerprint: z.string().optional(),
   productId: z.string().uuid().optional(),
+  /** Optional: deployable component this validation is for
+   *  (cortex / dashboard / ml / dist / agent / core). When set, the
+   *  response is `valid: false` if the license doesn't enable it. */
+  component: z.string().min(1).max(64).optional(),
 });
 
 const activateSchema = z.object({
@@ -34,7 +38,8 @@ router.post('/validate', async (req: Request, res: Response) => {
     const data = validateSchema.parse(req.body);
     const result = await licenseService.validateLicense(
       data.licenseKey,
-      data.machineFingerprint
+      data.machineFingerprint,
+      data.component,
     );
 
     if (!result.valid) {
@@ -50,6 +55,39 @@ router.post('/validate', async (req: Request, res: Response) => {
     }
     logger.error('Validate error:', error);
     res.status(500).json({ valid: false, error: 'Validation failed' });
+  }
+});
+
+/**
+ * GET /api/v1/licenses/:key/components
+ *
+ * Returns the deployable components this license authorises. Used by
+ * SILO deployment tooling to know which services to spin up
+ * (cortex/dashboard/ml/dist/etc.) on a per-license basis. The list is the
+ * per-license `enabledComponents` override if non-empty, else the
+ * product's `components`.
+ */
+router.get('/licenses/:key/components', async (req: Request, res: Response) => {
+  try {
+    const key = req.params.key;
+    if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) {
+      res.status(400).json({ error: 'Invalid license key format' });
+      return;
+    }
+    const result = await licenseService.validateLicense(key);
+    if (!result.valid) {
+      res.status(400).json(result);
+      return;
+    }
+    res.json({
+      valid: true,
+      product: result.product,
+      components: result.components || [],
+      features: result.features || [],
+    });
+  } catch (error) {
+    logger.error('Components lookup error:', error);
+    res.status(500).json({ error: 'Components lookup failed' });
   }
 });
 

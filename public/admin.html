@@ -505,6 +505,11 @@
         </div>
 
         <div class="form-group">
+          <label for="licenseEnabledComponents">Enabled components (comma-separated, leave blank to inherit from product)</label>
+          <input type="text" id="licenseEnabledComponents" placeholder="e.g. core,cortex,dashboard,ml,dist">
+        </div>
+
+        <div class="form-group">
           <label for="licenseMaxActivations">Max Activations</label>
           <input type="number" id="licenseMaxActivations" min="1" value="1">
         </div>
@@ -557,6 +562,11 @@
         <div class="form-group">
           <label for="testLicenseCustomerEmail">Customer email override</label>
           <input type="email" id="testLicenseCustomerEmail" placeholder="qa-tester@licenseserver.test">
+        </div>
+
+        <div class="form-group">
+          <label for="testLicenseEnabledComponents">Enabled components (comma-separated, leave blank to inherit)</label>
+          <input type="text" id="testLicenseEnabledComponents" placeholder="e.g. cortex,dashboard">
         </div>
 
         <div class="form-group">

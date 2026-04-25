@@ -21,6 +21,43 @@ without touching production data.
 
 ---
 
+## Components
+
+SILO can deploy individual services (cortex, dashboard, ml, dist, agent,
+core). The licensing model carries this on two columns:
+
+- `Product.components: String[]` — the maximum set this SKU is permitted
+  to enable.
+- `License.enabledComponents: String[]` — per-license override. Empty/null
+  means inherit the product's full set.
+
+The license validate API (`POST /api/v1/validate`) accepts an optional
+`component` field — a SILO service can call it at startup to check whether
+its license authorises that component. There's also a public read-only
+endpoint:
+
+```
+GET  /api/v1/licenses/<key>/components
+  → 200 { valid: true, product, components: [...], features: [...] }
+  → 400 { valid: false, error: "License has expired" }
+```
+
+deployment tooling polls this to learn which services to spin up per
+license.
+
+The default component allocation per test SKU:
+
+| SKU | components |
+|---|---|
+| `SILO Standalone Home` | `core` |
+| `SILO Standalone Professional` | `core` |
+| `SILO Cortex Business` | `core, cortex, dashboard, agent` |
+| `SILO Cortex Enterprise` | `core, cortex, dashboard, agent, ml, dist, enterprise-plugins` |
+
+Migration: `prisma/sql/2026-04-25-components.sql` (idempotent).
+
+---
+
 ## 2. Test SKUs (`licensing_seeds/01-test-skus.cjs`)
 
 Four products, prices in USD cents, idempotent (keyed by `name`):

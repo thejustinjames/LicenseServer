@@ -97,6 +97,14 @@ model Product {
   parentProduct        Product?       @relation("ProductAddons", fields: [parentProductId], references: [id])
   addons               Product[]      @relation("ProductAddons")
 
+  // SILO can deploy individual services (cortex, dist, dashboard, ml, etc.).
+  // `components` is the maximum set this SKU is permitted to enable. A
+  // license inherits these by default; a per-license `enabledComponents`
+  // narrows the set (e.g. an Enterprise SKU sold without ML for one
+  // customer). Free-form string[] so adding a new component doesn't
+  // require a schema migration.
+  components           String[]       @default([])
+
   licenses License[]
   quotes   Quote[]
 
@@ -157,6 +165,12 @@ model License {
   // License terms
   licenseTerm        LicenseTerm   @default(SUBSCRIPTION) @map("license_term")
   renewalDate        DateTime?     @map("renewal_date")
+
+  // Per-license override of the product's `components` list. Empty/null
+  // means "inherit the product's full component set". Use this to sell an
+  // Enterprise SKU but disable ML for a specific customer, or to issue a
+  // narrowly-scoped test license that only enables `cortex` + `dashboard`.
+  enabledComponents  String[]      @default([]) @map("enabled_components")
 
   // Parent license for seat assignments (organization master license)
   parentLicenseId    String?       @map("parent_license_id")

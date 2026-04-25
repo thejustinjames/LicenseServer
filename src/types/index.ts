@@ -38,6 +38,8 @@ export interface LicenseValidationResponse {
   product?: string;
   expiresAt?: string;
   features?: string[];
+  /** Components this license is authorised to deploy (cortex, dashboard, ml, dist, etc.). */
+  components?: string[];
   error?: string;
 }
 

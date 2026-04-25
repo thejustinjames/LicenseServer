@@ -15,6 +15,8 @@ export interface CreateProductInput {
   s3PackageKey?: string;
   version?: string;
   features?: string[];
+  /** Deployable components this SKU includes (e.g. ["core","cortex","dashboard","ml","dist"]). */
+  components?: string[];
   createStripeProduct?: boolean;
   // Monthly pricing
   stripePriceAmount?: number;
@@ -49,6 +51,7 @@ export interface UpdateProductInput {
   s3PackageKey?: string;
   version?: string;
   features?: string[];
+  components?: string[];
   priceMonthly?: number | null;
   priceAnnual?: number | null;
 }
@@ -164,6 +167,7 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       s3PackageKey: input.s3PackageKey,
       version: input.version,
       features: input.features || [],
+      components: input.components || [],
       stripeProductId,
       stripePriceId,
       stripePriceIdAnnual,

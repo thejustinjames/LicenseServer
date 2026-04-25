@@ -728,6 +728,11 @@ function handleLicenseSubmit(e) {
   var seats = parseInt(document.getElementById('licenseSeatCount').value);
   if (seats > 0) data.seatCount = seats;
 
+  var componentsRaw = (document.getElementById('licenseEnabledComponents').value || '').trim();
+  if (componentsRaw) {
+    data.enabledComponents = componentsRaw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
   var expiry = document.getElementById('licenseExpiry').value;
   if (expiry) {
     data.expiresAt = new Date(expiry).toISOString();
@@ -776,6 +781,10 @@ function handleTestLicenseSubmit(e) {
   if (email) body.customerEmail = email;
   var note = document.getElementById('testLicenseNote').value.trim();
   if (note) body.note = note;
+  var componentsRaw = (document.getElementById('testLicenseEnabledComponents').value || '').trim();
+  if (componentsRaw) {
+    body.enabledComponents = componentsRaw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
 
   api('/api/admin/licenses/test', { method: 'POST', body: JSON.stringify(body) })
     .then(function (resp) {
@@ -796,6 +805,9 @@ function showLicenseResult(license, product, customer) {
   if (customer) bits.push('issued to ' + customer.email);
   bits.push('seats=' + (license.seatCount || 1));
   bits.push('maxActivations=' + (license.maxActivations || 1));
+  var comps = (license.enabledComponents && license.enabledComponents.length) ? license.enabledComponents : null;
+  if (comps) bits.push('components=[' + comps.join(',') + ']');
+  else bits.push('components=(inherits from product)');
   if (license.expiresAt) bits.push('expires ' + new Date(license.expiresAt).toISOString().split('T')[0]);
   document.getElementById('licenseResultMeta').textContent = bits.join('  ·  ');
   document.getElementById('licenseResultModal').classList.add('active');
