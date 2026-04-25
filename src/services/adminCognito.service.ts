@@ -377,6 +377,49 @@ export async function adminGetUser(email: string) {
   return getClient().send(new AdminGetUserCommand({ UserPoolId: poolId(), Username: email }));
 }
 
+/**
+ * In-memory cache of per-user MFA-enrolment status.
+ *
+ * AWS Cognito does not emit the `amr` claim on tokens issued via
+ * AdminInitiateAuth / AdminRespondToAuthChallenge (it is only emitted for
+ * Hosted-UI / federated flows). The most reliable signal that a given
+ * staff-pool user has MFA enforced is `PreferredMfaSetting`: if it is set
+ * to `SOFTWARE_TOKEN_MFA`, Cognito will refuse to issue a token without
+ * completing the TOTP challenge. Therefore: a valid access token + that
+ * preference = MFA was used in this session.
+ *
+ * 5-minute TTL keeps AdminGetUser calls off the hot path.
+ */
+type CacheEntry = { mfa: boolean; expiresAt: number };
+const mfaCache = new Map<string, CacheEntry>();
+const MFA_CACHE_TTL_MS = 5 * 60 * 1000;
+
+export async function hasTotpEnforced(email: string): Promise<boolean> {
+  const now = Date.now();
+  const cached = mfaCache.get(email.toLowerCase());
+  if (cached && cached.expiresAt > now) return cached.mfa;
+  try {
+    const out = await adminGetUser(email);
+    const settings = out.UserMFASettingList || [];
+    const preferred = out.PreferredMfaSetting;
+    const mfa =
+      preferred === 'SOFTWARE_TOKEN_MFA' ||
+      settings.includes('SOFTWARE_TOKEN_MFA');
+    mfaCache.set(email.toLowerCase(), { mfa, expiresAt: now + MFA_CACHE_TTL_MS });
+    return mfa;
+  } catch (e) {
+    logger.warn('hasTotpEnforced lookup failed', {
+      email,
+      error: (e as Error).message,
+    });
+    return false;
+  }
+}
+
+export function invalidateMfaCache(email: string) {
+  mfaCache.delete(email.toLowerCase());
+}
+
 export async function adminListGroupsForUser(email: string): Promise<string[]> {
   const out = await getClient().send(
     new AdminListGroupsForUserCommand({ UserPoolId: poolId(), Username: email }),
