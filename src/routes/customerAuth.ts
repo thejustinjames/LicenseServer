@@ -14,6 +14,8 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { authRateLimit } from '../middleware/rateLimit.js';
 import { authenticate } from '../middleware/auth.js';
+import { idleTimeout, seedSession } from '../middleware/idleTimeout.js';
+import { clearSession } from '../config/redis.js';
 import { passwordSchema } from '../utils/password.js';
 import * as captchaService from '../services/captcha.service.js';
 import * as cognito from '../services/customerCognito.service.js';
@@ -166,6 +168,7 @@ router.post('/login', authRateLimit, async (req, res: Response) => {
     }
     const result = await cognito.login(data.email, data.password);
     if (result.kind === 'tokens') {
+      await seedSession(result.tokens.accessToken);
       res.json({ tokens: result.tokens });
       return;
     }
@@ -184,6 +187,7 @@ router.post('/mfa/challenge', authRateLimit, async (req, res: Response) => {
     const data = mfaChallengeSchema.parse(req.body);
     const result = await cognito.respondToTotpChallenge(data.email, data.code, data.session);
     if (result.kind === 'tokens') {
+      await seedSession(result.tokens.accessToken);
       res.json({ tokens: result.tokens });
       return;
     }
@@ -224,7 +228,7 @@ function getBearer(req: AuthenticatedRequest): string | null {
   return scheme === 'Bearer' && token ? token : null;
 }
 
-router.post('/mfa/totp/associate', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/mfa/totp/associate', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const access = getBearer(req);
     if (!access) {
@@ -238,7 +242,7 @@ router.post('/mfa/totp/associate', authenticate, async (req: AuthenticatedReques
   }
 });
 
-router.post('/mfa/totp/verify', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/mfa/totp/verify', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const access = getBearer(req);
     if (!access) {
@@ -262,7 +266,7 @@ router.post('/mfa/totp/verify', authenticate, async (req: AuthenticatedRequest, 
   }
 });
 
-router.post('/mfa/preference', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/mfa/preference', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const access = getBearer(req);
     if (!access) {
@@ -283,10 +287,11 @@ router.post('/mfa/preference', authenticate, async (req: AuthenticatedRequest, r
   }
 });
 
-router.post('/logout', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/logout', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const access = getBearer(req);
     if (access) await cognito.globalSignOut(access).catch(() => {});
+    if (req.tokenPayload?.jti) await clearSession(req.tokenPayload.jti);
     res.json({ success: true });
   } catch (err) {
     handleError(res, err, 'logout');

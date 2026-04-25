@@ -3,6 +3,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import { authenticate } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
+import { idleTimeout } from '../middleware/idleTimeout.js';
 import { validateIdParam, parsePositiveInt, sanitizeString } from '../middleware/validation.js';
 import * as productService from '../services/product.service.js';
 import * as licenseService from '../services/license.service.js';
@@ -62,6 +63,7 @@ const upload = multer({
 const router = Router();
 
 router.use(authenticate);
+router.use(idleTimeout);
 router.use(requireAdmin);
 
 // Product schemas

@@ -261,6 +261,7 @@ function logout() {
       localStorage.removeItem('lsAccessToken');
       localStorage.removeItem('lsRefreshToken');
       localStorage.removeItem('lsUser');
+      if (window.LicenseServerIdleTimer) window.LicenseServerIdleTimer.onLogout();
       window.location.href = '/';
     });
 }

@@ -13,7 +13,10 @@
 
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import jwt from 'jsonwebtoken';
 import { authRateLimit } from '../middleware/rateLimit.js';
+import { seedSession } from '../middleware/idleTimeout.js';
+import { clearSession } from '../config/redis.js';
 import { passwordSchema } from '../utils/password.js';
 import * as adminAuth from '../services/adminCognito.service.js';
 import * as customerAuth from '../services/customerCognito.service.js';
@@ -77,6 +80,7 @@ router.post('/login', authRateLimit, async (req, res: Response) => {
     if (pool === 'staff') {
       const r = await adminAuth.login(data.email, data.password);
       if (r.kind === 'tokens') {
+        await seedSession(r.tokens.accessToken);
         res.json({ pool, tokens: r.tokens });
         return;
       }
@@ -91,6 +95,7 @@ router.post('/login', authRateLimit, async (req, res: Response) => {
     // customer pool
     const r = await customerAuth.login(data.email, data.password);
     if (r.kind === 'tokens') {
+      await seedSession(r.tokens.accessToken);
       res.json({ pool, tokens: r.tokens });
       return;
     }
@@ -110,6 +115,7 @@ router.post('/mfa/challenge', authRateLimit, async (req, res: Response) => {
     if (data.pool === 'staff') {
       const r = await adminAuth.respondTotp(data.email, data.code, data.session);
       if (r.kind === 'tokens') {
+        await seedSession(r.tokens.accessToken);
         res.json({ pool: data.pool, tokens: r.tokens });
         return;
       }
@@ -118,6 +124,7 @@ router.post('/mfa/challenge', authRateLimit, async (req, res: Response) => {
     }
     const r = await customerAuth.respondToTotpChallenge(data.email, data.code, data.session);
     if (r.kind === 'tokens') {
+      await seedSession(r.tokens.accessToken);
       res.json({ pool: data.pool, tokens: r.tokens });
       return;
     }
@@ -225,6 +232,10 @@ router.post('/logout', async (req, res: Response) => {
     // access token, so it works for both staff and customer pools.
     if (access) {
       await customerAuth.globalSignOut(access).catch(() => undefined);
+      try {
+        const decoded = jwt.decode(access) as { jti?: string } | null;
+        if (decoded?.jti) await clearSession(decoded.jti);
+      } catch { /* ignore */ }
     }
     res.json({ success: true });
   } catch (err) {

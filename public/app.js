@@ -31,9 +31,18 @@ document.addEventListener('DOMContentLoaded', function() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
+    var idleSignout = urlParams.get('reason') === 'idle';
+    if (idleSignout) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     // If not authenticated, show login modal
     if (!user) {
       openAuthModal('login');
+      if (idleSignout) {
+        var alert = document.getElementById('loginAlert');
+        if (alert) alert.innerHTML = '<div class="alert alert-info">You were signed out due to 15 minutes of inactivity.</div>';
+      }
     } else {
       loadCategories();
       // Don't load products until category is selected
@@ -128,6 +137,7 @@ function clearAuthState() {
   // doesn't get picked up after a page reload.
   localStorage.removeItem('token');
   localStorage.removeItem('user');
+  if (window.LicenseServerIdleTimer) window.LicenseServerIdleTimer.onLogout();
   updateAuthUI();
 }
 
@@ -158,6 +168,7 @@ function applyTokens(tokens, pool) {
   localStorage.setItem('lsAccessToken', token);
   localStorage.setItem('lsRefreshToken', refreshToken);
   localStorage.setItem('lsUser', JSON.stringify(user));
+  if (window.LicenseServerIdleTimer) window.LicenseServerIdleTimer.onLogin();
 }
 
 // Bind all event listeners

@@ -226,3 +226,69 @@ export async function checkRateLimit(
     };
   }
 }
+
+// ============================================================================
+// SESSION IDLE TRACKING
+// ============================================================================
+
+const SESSION_IDLE_PREFIX = 'session:idle:';
+const IN_MEMORY_SESSIONS = new Map<string, number>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [jti, expiresAt] of IN_MEMORY_SESSIONS.entries()) {
+    if (expiresAt < now) {
+      IN_MEMORY_SESSIONS.delete(jti);
+    }
+  }
+}, 60000);
+
+/**
+ * Refresh last-activity for a session keyed by jti. The entry expires after
+ * `idleTtlMs` of inactivity, so a stale entry == idle timeout.
+ *
+ * Returns true if the entry existed before this call, false if it was newly
+ * created (i.e. first request after login). Callers can use this distinction
+ * but the idle middleware does not need to.
+ */
+export async function touchSession(jti: string, idleTtlMs: number): Promise<boolean> {
+  const ttlSeconds = Math.ceil(idleTtlMs / 1000);
+  const expiresAt = Date.now() + idleTtlMs;
+
+  if (isConnected && redisClient) {
+    const key = `${SESSION_IDLE_PREFIX}${jti}`;
+    const existed = (await redisClient.exists(key)) === 1;
+    await redisClient.setex(key, ttlSeconds, String(expiresAt));
+    return existed;
+  }
+  const existed = IN_MEMORY_SESSIONS.has(jti);
+  IN_MEMORY_SESSIONS.set(jti, expiresAt);
+  return existed;
+}
+
+/**
+ * Returns true if the session entry is present (i.e. not idle-expired).
+ */
+export async function isSessionActive(jti: string): Promise<boolean> {
+  if (isConnected && redisClient) {
+    return (await redisClient.exists(`${SESSION_IDLE_PREFIX}${jti}`)) === 1;
+  }
+  const expiresAt = IN_MEMORY_SESSIONS.get(jti);
+  if (!expiresAt) return false;
+  if (expiresAt < Date.now()) {
+    IN_MEMORY_SESSIONS.delete(jti);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Drop the idle entry on logout so the same jti cannot be reused.
+ */
+export async function clearSession(jti: string): Promise<void> {
+  if (isConnected && redisClient) {
+    await redisClient.del(`${SESSION_IDLE_PREFIX}${jti}`);
+  } else {
+    IN_MEMORY_SESSIONS.delete(jti);
+  }
+}

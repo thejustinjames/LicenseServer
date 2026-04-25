@@ -124,13 +124,15 @@ export class CognitoAuthProvider implements AuthProviderInterface {
       return;
     }
 
-    const user = await this.verifyToken(token);
-    if (!user) {
+    const verified = await this.verifyAndExtract(token);
+    if (!verified) {
       res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }
 
-    req.user = user;
+    req.user = verified.user;
+    req.token = token;
+    req.tokenPayload = verified.tokenPayload;
     next();
   }
 
@@ -153,46 +155,76 @@ export class CognitoAuthProvider implements AuthProviderInterface {
       return;
     }
 
-    const user = await this.verifyToken(token);
-    if (user) {
-      req.user = user;
+    const verified = await this.verifyAndExtract(token);
+    if (verified) {
+      req.user = verified.user;
+      req.token = token;
+      req.tokenPayload = verified.tokenPayload;
     }
 
     next();
+  }
+
+  private async verifyAndExtract(token: string): Promise<{
+    user: AuthUser;
+    tokenPayload: { id: string; email: string; isAdmin: boolean; jti?: string; iat?: number; exp?: number };
+  } | null> {
+    try {
+      const verified = await this.verifyWithEither(token);
+      if (!verified) return null;
+      const user = await this.userFromPayload(verified);
+      return {
+        user,
+        tokenPayload: {
+          id: user.id,
+          email: user.email,
+          isAdmin: user.isAdmin,
+          jti: verified.payload.jti,
+          iat: verified.payload.iat,
+          exp: verified.payload.exp,
+        },
+      };
+    } catch (error) {
+      logger.debug('Cognito token verification failed', { error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  }
+
+  private async userFromPayload(verified: { payload: CognitoTokenPayload; pool: 'staff' | 'customer' }): Promise<AuthUser> {
+    const { payload, pool } = verified;
+    const isIdToken = payload.token_use === 'id';
+    const idPayload = payload as CognitoIdTokenPayload;
+    const accessPayload = payload as CognitoAccessTokenPayload;
+
+    const email = isIdToken ? idPayload.email : accessPayload.username;
+    const groups = payload['cognito:groups'] || [];
+    const isAdmin =
+      pool === 'staff' &&
+      (groups.includes(this.adminGroupName) ||
+        (isIdToken && idPayload['custom:isAdmin'] === 'true'));
+
+    const amr = (payload as { amr?: string[] }).amr || [];
+    const mfaAuthenticated = amr.includes('mfa') || amr.includes('totp_mfa');
+
+    return {
+      id: payload.sub,
+      email,
+      isAdmin,
+      cognitoSub: payload.sub,
+      groups,
+      pool,
+      amr,
+      mfaAuthenticated,
+    };
   }
 
   async verifyToken(token: string): Promise<AuthUser | null> {
     try {
       const verified = await this.verifyWithEither(token);
       if (!verified) return null;
-      const { payload, pool } = verified;
-
-      const isIdToken = payload.token_use === 'id';
-      const idPayload = payload as CognitoIdTokenPayload;
-      const accessPayload = payload as CognitoAccessTokenPayload;
-
-      const email = isIdToken ? idPayload.email : accessPayload.username;
-      const groups = payload['cognito:groups'] || [];
       // Only the staff pool's admin group grants admin. Customer pool tokens
       // never grant admin even if a group with the same name exists.
-      const isAdmin =
-        pool === 'staff' &&
-        (groups.includes(this.adminGroupName) ||
-          (isIdToken && idPayload['custom:isAdmin'] === 'true'));
-
-      const amr = (payload as { amr?: string[] }).amr || [];
-      const mfaAuthenticated = amr.includes('mfa') || amr.includes('totp_mfa');
-
-      return {
-        id: payload.sub,
-        email,
-        isAdmin,
-        cognitoSub: payload.sub,
-        groups,
-        pool,
-        amr,
-        mfaAuthenticated,
-      };
+      return await this.userFromPayload(verified);
     } catch (error) {
       logger.debug('Cognito token verification failed', { error: error instanceof Error ? error.message : String(error) });
       return null;

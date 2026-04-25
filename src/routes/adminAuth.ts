@@ -28,6 +28,7 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
+import { idleTimeout, seedSession } from '../middleware/idleTimeout.js';
 import { authRateLimit } from '../middleware/rateLimit.js';
 import { passwordSchema } from '../utils/password.js';
 import * as admin from '../services/adminCognito.service.js';
@@ -82,7 +83,7 @@ const mfaChallengeSchema = z.object({
 const emailOnly = z.object({ email: z.string().email() });
 
 // --- Existing-admin invite/disable/reset ----------------------------------
-router.post('/invite', authenticate, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/invite', authenticate, idleTimeout, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = inviteSchema.parse(req.body);
     const out = await admin.inviteAdmin(data);
@@ -92,7 +93,7 @@ router.post('/invite', authenticate, requireAdmin, async (req: AuthenticatedRequ
   }
 });
 
-router.post('/disable', authenticate, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/disable', authenticate, idleTimeout, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = emailOnly.parse(req.body);
     if (req.user?.email && req.user.email.toLowerCase() === data.email.toLowerCase()) {
@@ -106,7 +107,7 @@ router.post('/disable', authenticate, requireAdmin, async (req: AuthenticatedReq
   }
 });
 
-router.post('/reset-password', authenticate, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/reset-password', authenticate, idleTimeout, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = emailOnly.parse(req.body);
     await admin.resetAdminPassword(data.email);
@@ -116,7 +117,7 @@ router.post('/reset-password', authenticate, requireAdmin, async (req: Authentic
   }
 });
 
-router.post('/remove-role', authenticate, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/remove-role', authenticate, idleTimeout, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = emailOnly.parse(req.body);
     if (req.user?.email && req.user.email.toLowerCase() === data.email.toLowerCase()) {
@@ -178,6 +179,7 @@ router.post('/mfa/setup/verify', authRateLimit, async (req, res: Response) => {
       await admin.enforceMfaPreference(data.email).catch((e) => {
         logger.warn('Failed to enforce MFA preference', { email: data.email, error: e });
       });
+      await seedSession(completed.tokens.accessToken);
       res.json({ tokens: completed.tokens });
       return;
     }
@@ -202,8 +204,9 @@ router.post('/mfa/challenge', authRateLimit, async (req, res: Response) => {
 });
 
 // --- helpers ---------------------------------------------------------------
-function respondWithResult(res: Response, r: admin.AdminAuthResult) {
+async function respondWithResult(res: Response, r: admin.AdminAuthResult): Promise<void> {
   if (r.kind === 'tokens') {
+    await seedSession(r.tokens.accessToken);
     res.json({ tokens: r.tokens });
     return;
   }
