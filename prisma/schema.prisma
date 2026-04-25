@@ -254,6 +254,31 @@ model SeatAssignment {
   @@map("seat_assignments")
 }
 
+// mTLS agent client certificate issuance ledger
+// (one row per cert issued by /api/v1/agents/enroll)
+model AgentCertificate {
+  id                 String    @id @default(uuid())
+  licenseId          String    @map("license_id")
+  machineFingerprint String    @map("machine_fingerprint")
+
+  serial             String    @unique
+  subject            String
+  fingerprintSha256  String    @map("fingerprint_sha256")
+  notBefore          DateTime  @map("not_before")
+  notAfter           DateTime  @map("not_after")
+
+  issuedAt           DateTime  @default(now()) @map("issued_at")
+  revokedAt          DateTime? @map("revoked_at")
+  revokedReason      String?   @map("revoked_reason")
+
+  // Loose join: do not cascade — keep ledger after license deletion for audit.
+  @@index([licenseId])
+  @@index([machineFingerprint])
+  @@index([revokedAt])
+  @@index([notAfter])
+  @@map("agent_certificates")
+}
+
 // Usage-based billing records
 model UsageRecord {
   id                   String   @id @default(uuid())

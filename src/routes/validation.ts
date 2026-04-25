@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { validationRateLimit } from '../middleware/rateLimit.js';
 import * as licenseService from '../services/license.service.js';
+import * as agentService from '../services/agent.service.js';
 import { getPublicKey } from '../utils/crypto.js';
 import { logger } from '../services/logger.service.js';
 
@@ -105,6 +106,41 @@ router.post('/deactivate', async (req: Request, res: Response) => {
     }
     logger.error('Deactivate error:', error);
     res.status(500).json({ success: false, error: 'Deactivation failed' });
+  }
+});
+
+// mTLS agent enrollment — exchange CSR for short-lived client cert.
+// Customer-opt-in via MTLS_AGENT_CA_ENABLED; returns 503 when disabled.
+const enrollSchema = z.object({
+  licenseKey: z
+    .string()
+    .regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
+  machineFingerprint: z.string().min(1).max(256),
+  csr: z.string().min(64).max(16384),
+  requestedValidityDays: z.number().int().positive().max(365).optional(),
+});
+
+router.post('/agents/enroll', async (req: Request, res: Response) => {
+  try {
+    const data = enrollSchema.parse(req.body);
+    const result = await agentService.enrollAgent({
+      licenseKey: data.licenseKey,
+      machineFingerprint: data.machineFingerprint,
+      csrPem: data.csr,
+      requestedValidityDays: data.requestedValidityDays,
+    });
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid request', details: error.errors });
+      return;
+    }
+    if (error instanceof agentService.EnrollmentError) {
+      res.status(error.code).json({ error: error.message });
+      return;
+    }
+    logger.error('Agent enrollment error:', error);
+    res.status(500).json({ error: 'Agent enrollment failed' });
   }
 });
 
