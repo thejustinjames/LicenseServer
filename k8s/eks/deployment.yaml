@@ -10,7 +10,7 @@ metadata:
     part-of: agencio
     managed-by: kustomize
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: license-server
