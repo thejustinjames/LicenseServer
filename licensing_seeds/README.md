@@ -14,6 +14,23 @@ needing the TypeScript toolchain.
 | File | Purpose |
 |---|---|
 | `01-test-skus.cjs` | The four test SKUs we ship for QA: Standalone Home, Standalone Professional, Cortex Business, Cortex Enterprise. |
+| `02-test-licenses.cjs` | One sample license per SKU, keyed against tier-specific QA customers. Activations + seat counts per the policy below. Run **after** `01-test-skus.cjs`. |
+
+## Activation + seat policy applied by `02-test-licenses.cjs`
+
+| SKU | maxActivations | seatCount | Enterprise modules |
+|---|---|---|---|
+| SILO Standalone Home | 1 | 1 | no |
+| SILO Standalone Professional | 1 | 1 | no |
+| SILO Cortex Business | 2 | 5 | no |
+| SILO Cortex Enterprise | 2 | 10 | **yes** (gated by the `enterprise-plugins` feature on the product) |
+
+`maxActivations` caps the number of distinct devices that can activate the
+key. `seatCount` caps the number of named seats that can be assigned under
+the licence. For the cortex tiers, both apply. The "Enterprise modules"
+gate is a feature flag on the product (`features` includes
+`enterprise-plugins`); the licence inherits it via the product join, so the
+runtime can check `license.product.features.includes('enterprise-plugins')`.
 
 ## Run inside a running pod
 
