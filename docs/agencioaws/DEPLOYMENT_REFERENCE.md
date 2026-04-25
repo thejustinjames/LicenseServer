@@ -28,7 +28,8 @@ It is a snapshot of the live state observed on **2026-04-25** in the
 | Database | RDS Postgres `agencio-postgres-dev`, DB `agenciosecurity`, schema `license_server` |
 | Cache | ElastiCache Serverless (Valkey/Redis) `ag-preprod-k8-services-auth` |
 | Object storage | S3 bucket `ag-license-server-assets` |
-| Auth | AWS Cognito user pool `ap-southeast-1_y6HkbFYfL` |
+| Auth (staff/admin) | AWS Cognito user pool `ap-southeast-1_y6HkbFYfL` |
+| Auth (external customers) | AWS Cognito user pool `ap-southeast-1_7KTxiTaT8` (`ag-license-customers`) — see `CUSTOMER_AUTH.md` |
 | Secrets | AWS Secrets Manager: `preprod/license-server` |
 
 ---
@@ -139,9 +140,25 @@ Notes:
 - Used for installer/asset downloads, signed URLs (`S3_DOWNLOAD_EXPIRY_HOURS=4`).
 
 ### Cognito
-- User pool: `ap-southeast-1_y6HkbFYfL`
-- Client: `381dr21a72padpvi3lsajt2rfo` (client ID and secret in Secrets Manager).
-- `AUTH_PROVIDER=cognito`.
+- **Staff/admin pool**: `ap-southeast-1_y6HkbFYfL` (the agencio.cloud directory)
+  - Browser SRP client: `381dr21a72padpvi3lsajt2rfo`.
+  - License-server admin client: `r88um79javddi0gkq32pusin9`
+    (`license-server-admin`, no secret, ADMIN_USER_PASSWORD_AUTH only).
+  - License Server admin group: `license-admins`. Pool-level TOTP MFA enabled
+    (`OPTIONAL`); the License Server enforces MFA at the application layer
+    via `ADMIN_REQUIRE_MFA=true` and the `amr` claim.
+  - Admin auth surface: `/api/admin/auth/*`.
+  - Full details in `docs/agencioaws/ADMIN_AUTH.md`.
+  - `AUTH_PROVIDER=cognito`.
+- **Customer pool** (external paying users): `ap-southeast-1_7KTxiTaT8`
+  (`ag-license-customers`).
+  - Web client: `2tolovmjlpk3u9v3se5v4kh3g1` (no secret, USER_SRP/REFRESH).
+  - Server client: `7glm2hp5rgqv59h3levngplbpq` (with secret, ADMIN flows).
+  - MFA: `OPTIONAL`, TOTP only.
+  - Groups: `customer`, `customer-admin`, `staff-support`.
+  - Endpoints exposed at `/api/customer/auth/*` when
+    `CUSTOMER_AUTH_ENABLED=true`.
+  - Full details in `docs/agencioaws/CUSTOMER_AUTH.md`.
 
 ### ECR
 - Repo: `772693061584.dkr.ecr.ap-southeast-1.amazonaws.com/ag-license-server`
@@ -431,4 +448,6 @@ $KCTL rollout undo    deploy/license-server -n preprod
 - Build script: `k8s/eks/deploy.sh`
 - Container build: `Dockerfile.eks`
 - Existing public deployment guide: `docs/EKS-DEPLOYMENT.md` (template/how-to)
+- Customer Cognito + MFA: `docs/agencioaws/CUSTOMER_AUTH.md`
+- Admin Cognito + MFA:    `docs/agencioaws/ADMIN_AUTH.md`
 - This document: `docs/agencioaws/DEPLOYMENT_REFERENCE.md` (live state, 2026-04-25)

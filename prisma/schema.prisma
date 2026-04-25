@@ -114,6 +114,11 @@ model Customer {
   isAdmin             Boolean   @default(false) @map("is_admin")
   failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
   lockedUntil         DateTime? @map("locked_until")
+  // Cognito linkage for customers using the external user pool. Nullable so
+  // legacy local-password customers continue to work until migrated.
+  cognitoSub          String?   @unique @map("cognito_sub")
+  cognitoPool         String?   @map("cognito_pool")
+  mfaEnabledAt        DateTime? @map("mfa_enabled_at")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 

@@ -19,6 +19,13 @@ export interface AuthUser {
   isAdmin: boolean;
   cognitoSub?: string;
   groups?: string[];
+  /** Which Cognito pool issued the token (when AUTH_PROVIDER=cognito). */
+  pool?: 'staff' | 'customer';
+  /** Authentication methods reference (RFC 8176-style). Cognito populates
+   *  this on tokens that completed MFA: e.g. ["mfa", "totp_mfa"]. */
+  amr?: string[];
+  /** Convenience flag: true iff the token's amr proves MFA was used. */
+  mfaAuthenticated?: boolean;
 }
 
 export interface AuthProviderInterface {

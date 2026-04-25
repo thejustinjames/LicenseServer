@@ -20,6 +20,8 @@ import portalRoutes from './routes/portal.js';
 import validationRoutes from './routes/validation.js';
 import webhookRoutes from './routes/webhooks.js';
 import desktopRoutes from './routes/desktop.js';
+import customerAuthRoutes from './routes/customerAuth.js';
+import adminAuthRoutes from './routes/adminAuth.js';
 
 const app = express();
 
@@ -65,8 +67,10 @@ app.use('/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: config.REQUEST_BODY_LIMIT }));
 
 // Routes
+app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/portal', portalRoutes);
+app.use('/api/customer/auth', customerAuthRoutes);
 app.use('/api/v1', validationRoutes);
 app.use('/api/v1/desktop', desktopRoutes);
 app.use('/webhooks', webhookRoutes);
@@ -85,6 +89,7 @@ app.get('/api', (_req, res) => {
     endpoints: {
       admin: '/api/admin',
       portal: '/api/portal',
+      customerAuth: '/api/customer/auth',
       validation: '/api/v1',
       desktop: '/api/v1/desktop',
       webhooks: '/webhooks/stripe',

@@ -33,7 +33,18 @@ data:
   # Authentication - AWS Cognito
   AUTH_PROVIDER: "cognito"
   COGNITO_REGION: "ap-southeast-1"
-  # COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID loaded from Secrets Manager
+  # COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID and COGNITO_ADMIN_CLIENT_ID
+  # loaded from Secrets Manager.
+  # License Server admins live in the staff pool, in this group, and must
+  # complete MFA (TOTP) in the token (amr=mfa) for admin endpoints.
+  COGNITO_ADMIN_GROUP: "license-admins"
+  ADMIN_GROUP_NAME: "license-admins"
+  ADMIN_REQUIRE_MFA: "true"
+  # Customer (external) Cognito pool — separate from staff pool above.
+  # CUSTOMER_AUTH_ENABLED, CUSTOMER_COGNITO_USER_POOL_ID,
+  # CUSTOMER_COGNITO_CLIENT_ID, CUSTOMER_COGNITO_SERVER_CLIENT_ID and
+  # CUSTOMER_COGNITO_SERVER_CLIENT_SECRET are loaded from Secrets Manager.
+  CUSTOMER_COGNITO_REGION: "ap-southeast-1"
 
   # Database - RDS PostgreSQL (connection string from Secrets Manager)
   # DATABASE_URL loaded from Secrets Manager
