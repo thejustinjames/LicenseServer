@@ -12,6 +12,7 @@ import { initializeAuthProvider } from './auth/index.js';
 import { initializeConfigProvider } from './config/providers/index.js';
 import { initializeEmailService } from './services/email.service.js';
 import { initializeRedis, closeRedis, isRedisAvailable } from './config/redis.js';
+import { ensureCA, isMtlsCaEnabled } from './services/ca.service.js';
 import { logger, generateRequestId } from './services/logger.service.js';
 import { requestTimeout, responseHeaders } from './middleware/timeout.js';
 
@@ -217,6 +218,20 @@ async function start() {
 
     await connectDatabase();
     await ensureAdminExists();
+
+    // mTLS agent CA — opt-in (MTLS_AGENT_CA_ENABLED). Customers who run
+    // their own Cortex turn this on to allow sidecars to enroll for client
+    // certificates. Idempotent: only generates a CA if one is not already
+    // present in MTLS_CA_SECRET_NAME.
+    if (isMtlsCaEnabled()) {
+      try {
+        await ensureCA();
+      } catch (err) {
+        logger.error('Failed to bootstrap mTLS agent CA', err);
+        // Non-fatal: license-server stays up; agents/enroll will return 503
+        // until the secret is reachable / IAM is granted.
+      }
+    }
 
     const port = parseInt(config.PORT, 10);
     app.listen(port, () => {
