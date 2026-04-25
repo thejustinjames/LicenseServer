@@ -22,6 +22,7 @@ import webhookRoutes from './routes/webhooks.js';
 import desktopRoutes from './routes/desktop.js';
 import customerAuthRoutes from './routes/customerAuth.js';
 import adminAuthRoutes from './routes/adminAuth.js';
+import authRoutes from './routes/auth.js';
 
 const app = express();
 
@@ -67,6 +68,7 @@ app.use('/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: config.REQUEST_BODY_LIMIT }));
 
 // Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/portal', portalRoutes);
@@ -87,9 +89,11 @@ app.get('/api', (_req, res) => {
     name: 'License Server API',
     version: '1.0.0',
     endpoints: {
+      auth: '/api/auth',
       admin: '/api/admin',
       portal: '/api/portal',
       customerAuth: '/api/customer/auth',
+      adminAuth: '/api/admin/auth',
       validation: '/api/v1',
       desktop: '/api/v1/desktop',
       webhooks: '/webhooks/stripe',

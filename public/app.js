@@ -1,7 +1,9 @@
 var API_URL = '';
-// Token stored in memory (set from login response, also sent via httpOnly cookie)
-var token = localStorage.getItem('token'); // Backward compat during migration
-var user = JSON.parse(localStorage.getItem('user') || 'null');
+// Cognito tokens.
+var token = localStorage.getItem('lsAccessToken');
+var refreshToken = localStorage.getItem('lsRefreshToken');
+var user = JSON.parse(localStorage.getItem('lsUser') || 'null');
+var pendingMfa = null; // { email, session, pool } during a SOFTWARE_TOKEN_MFA challenge
 var productSearchTimeout = null;
 
 // CAPTCHA configuration
@@ -100,22 +102,62 @@ function resetCaptcha(containerId) {
   }
 }
 
-// Check authentication status from server
+// Check authentication status from the stored Cognito token. The access
+// token is short-lived (~1h); if it's missing or expired the API helper
+// will surface 401 and we'll bounce the user back to the login modal.
 function checkAuthStatus() {
-  return api('/api/portal/me')
-    .then(function(data) {
-      user = data;
-      localStorage.setItem('user', JSON.stringify(user));
+  return new Promise(function (resolve) {
+    if (token && user) {
       updateAuthUI();
-    })
-    .catch(function() {
-      // Not authenticated or cookie expired
-      user = null;
-      token = null;
-      localStorage.removeItem('user');
-      localStorage.removeItem('token');
-      updateAuthUI();
-    });
+    } else {
+      clearAuthState();
+    }
+    resolve();
+  });
+}
+
+function clearAuthState() {
+  user = null;
+  token = null;
+  refreshToken = null;
+  pendingMfa = null;
+  localStorage.removeItem('lsUser');
+  localStorage.removeItem('lsAccessToken');
+  localStorage.removeItem('lsRefreshToken');
+  // Clean up legacy keys from the previous bcrypt flow so a stale token
+  // doesn't get picked up after a page reload.
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  updateAuthUI();
+}
+
+// Decode a JWT payload without signature verification — only for reading
+// claims like email and cognito:groups for UI display.
+function decodeJwt(jwt) {
+  try {
+    var b64 = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    return JSON.parse(atob(b64));
+  } catch (e) {
+    return null;
+  }
+}
+
+function applyTokens(tokens, pool) {
+  token = tokens.accessToken;
+  refreshToken = tokens.refreshToken || '';
+  var claims = decodeJwt(tokens.idToken) || {};
+  var groups = claims['cognito:groups'] || [];
+  user = {
+    email: claims.email || '',
+    sub: claims.sub || '',
+    pool: pool,
+    isAdmin: pool === 'staff' && groups.indexOf('license-admins') !== -1,
+    groups: groups
+  };
+  localStorage.setItem('lsAccessToken', token);
+  localStorage.setItem('lsRefreshToken', refreshToken);
+  localStorage.setItem('lsUser', JSON.stringify(user));
 }
 
 // Bind all event listeners
@@ -171,12 +213,6 @@ function bindEvents() {
       closeAuthModal();
     }
   });
-
-  // Social login buttons (placeholder - show coming soon)
-  document.getElementById('googleLoginBtn').addEventListener('click', handleSocialLogin);
-  document.getElementById('facebookLoginBtn').addEventListener('click', handleSocialLogin);
-  document.getElementById('googleSignupBtn').addEventListener('click', handleSocialLogin);
-  document.getElementById('facebookSignupBtn').addEventListener('click', handleSocialLogin);
 
   // User nav
   document.getElementById('dashboardBtn').addEventListener('click', function() {
@@ -350,15 +386,6 @@ function showAuthView(view) {
   }
 }
 
-// Social Login Handler (placeholder)
-function handleSocialLogin(e) {
-  var provider = e.target.closest('.btn-google') ? 'Google' : 'Facebook';
-  var alertEl = document.getElementById('loginView').classList.contains('hidden')
-    ? document.getElementById('registerAlert')
-    : document.getElementById('loginAlert');
-  alertEl.innerHTML = '<div class="alert alert-info">' + provider + ' login coming soon!</div>';
-}
-
 // Auth UI
 function updateAuthUI() {
   var authNav = document.getElementById('authNav');
@@ -411,11 +438,17 @@ function api(endpoint, options) {
     method: options.method || 'GET',
     headers: headers,
     body: options.body,
-    credentials: 'include' // Send cookies with requests
+    credentials: 'include'
   })
   .then(function(response) {
     return response.json().then(function(data) {
       if (!response.ok) {
+        // Cognito access tokens expire after ~1h. On 401 reset client
+        // state and force the login modal back up.
+        if (response.status === 401 && token) {
+          clearAuthState();
+          openAuthModal('login');
+        }
         throw new Error(data.error || 'Request failed');
       }
       return data;
@@ -589,74 +622,122 @@ function copyToClipboard(text, btn) {
   });
 }
 
-// Handle Login
+// Switch the login form between password-only and TOTP-required states.
+function showLoginMfaStep() {
+  document.getElementById('loginEmailGroup').classList.add('hidden');
+  document.getElementById('loginPasswordGroup').classList.add('hidden');
+  document.getElementById('loginTotpGroup').classList.remove('hidden');
+  document.getElementById('loginSubmitBtn').textContent = 'Verify code';
+  setTimeout(function () {
+    var totp = document.getElementById('loginTotp');
+    if (totp) totp.focus();
+  }, 0);
+}
+
+function resetLoginForm() {
+  pendingMfa = null;
+  document.getElementById('loginEmailGroup').classList.remove('hidden');
+  document.getElementById('loginPasswordGroup').classList.remove('hidden');
+  document.getElementById('loginTotpGroup').classList.add('hidden');
+  var pw = document.getElementById('loginPassword');
+  var totp = document.getElementById('loginTotp');
+  if (pw) pw.value = '';
+  if (totp) totp.value = '';
+  document.getElementById('loginSubmitBtn').textContent = 'Sign in';
+}
+
+// Handle Login (Cognito-backed unified endpoint).
 function handleLogin(event) {
   event.preventDefault();
   var alertEl = document.getElementById('loginAlert');
-  var email = document.getElementById('loginEmail').value;
-  var password = document.getElementById('loginPassword').value;
-  var captchaToken = getCaptchaToken('loginCaptcha');
+  alertEl.innerHTML = '';
 
-  // Check CAPTCHA if enabled
-  if (captchaConfig.enabled && !captchaToken) {
-    alertEl.innerHTML = '<div class="alert alert-error">Please complete the CAPTCHA verification</div>';
+  // MFA challenge step
+  if (pendingMfa) {
+    var code = (document.getElementById('loginTotp').value || '').trim();
+    if (!/^\d{6}$/.test(code)) {
+      alertEl.innerHTML = '<div class="alert alert-error">Enter the 6-digit code from your authenticator.</div>';
+      return;
+    }
+    fetch(API_URL + '/api/auth/mfa/challenge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: pendingMfa.email,
+        code: code,
+        session: pendingMfa.session,
+        pool: pendingMfa.pool
+      })
+    })
+      .then(function (resp) {
+        return resp.json().then(function (data) {
+          return { ok: resp.ok, data: data };
+        });
+      })
+      .then(function (r) {
+        if (!r.ok || !r.data.tokens) {
+          alertEl.innerHTML = '<div class="alert alert-error">' +
+            escapeHtml(r.data.error || 'MFA failed') + '</div>';
+          return;
+        }
+        applyTokens(r.data.tokens, r.data.pool);
+        finishLogin();
+      })
+      .catch(function (err) {
+        alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(err.message) + '</div>';
+      });
     return;
   }
 
-  var requestBody = { email: email, password: password };
-  if (captchaToken) {
-    requestBody.captchaToken = captchaToken;
-  }
+  // Password step
+  var email = (document.getElementById('loginEmail').value || '').trim();
+  var password = document.getElementById('loginPassword').value;
 
-  fetch(API_URL + '/api/portal/auth/login', {
+  fetch(API_URL + '/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-    credentials: 'include'
+    body: JSON.stringify({ email: email, password: password })
   })
-  .then(function(response) {
-    return response.json().then(function(data) {
-      return { ok: response.ok, status: response.status, data: data };
-    });
-  })
-  .then(function(result) {
-    if (!result.ok) {
-      // Check if account is locked
-      if (result.data.locked) {
-        var minutes = result.data.lockoutMinutesRemaining || 15;
+    .then(function (resp) {
+      return resp.json().then(function (data) {
+        return { ok: resp.ok, data: data };
+      });
+    })
+    .then(function (r) {
+      if (!r.ok) {
         alertEl.innerHTML = '<div class="alert alert-error">' +
-          '<strong>Account Locked</strong><br>' +
-          'Too many failed login attempts. ' +
-          'Please try again in ' + minutes + ' minute' + (minutes === 1 ? '' : 's') + '.' +
-          '</div>';
-      } else {
-        alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(result.data.error || 'Login failed') + '</div>';
+          escapeHtml(r.data.error || 'Login failed') + '</div>';
+        return;
       }
-      resetCaptcha('loginCaptcha');
-      return;
-    }
+      if (r.data.tokens) {
+        applyTokens(r.data.tokens, r.data.pool);
+        finishLogin();
+        return;
+      }
+      if (r.data.challenge && r.data.challenge.challengeName === 'SOFTWARE_TOKEN_MFA') {
+        pendingMfa = { email: email, session: r.data.challenge.session, pool: r.data.pool };
+        showLoginMfaStep();
+        alertEl.innerHTML = '<div class="alert alert-info">Enter the 6-digit code from your authenticator app.</div>';
+        return;
+      }
+      if (r.data.challenge) {
+        alertEl.innerHTML = '<div class="alert alert-error">Unsupported challenge: ' +
+          escapeHtml(r.data.challenge.challengeName) + '. Contact support.</div>';
+        return;
+      }
+      alertEl.innerHTML = '<div class="alert alert-error">Unexpected server response.</div>';
+    })
+    .catch(function (err) {
+      alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(err.message) + '</div>';
+    });
+}
 
-    var data = result.data;
-    token = data.token;
-    user = data.customer;
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    updateAuthUI();
-
-    // Close modal (now allowed since user is set)
-    var modal = document.getElementById('authModal');
-    modal.classList.add('hidden');
-    document.body.style.overflow = '';
-    alertEl.innerHTML = '';
-
-    // Load data now that user is authenticated
-    loadCategories();
-    showSection('home');
-  })
-  .catch(function(error) {
-    alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
-    resetCaptcha('loginCaptcha');
-  });
+function finishLogin() {
+  resetLoginForm();
+  updateAuthUI();
+  closeAuthModal();
+  loadCategories();
+  showSection('home');
 }
 
 // Handle Register
@@ -679,31 +760,26 @@ function handleRegister(event) {
     requestBody.captchaToken = captchaToken;
   }
 
-  api('/api/portal/auth/register', {
+  api('/api/auth/signup', {
     method: 'POST',
     body: JSON.stringify(requestBody)
   })
-  .then(function(data) {
-    token = data.token;
-    user = data.customer;
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    updateAuthUI();
-
-    // Close modal (now allowed since user is set)
-    var modal = document.getElementById('authModal');
-    modal.classList.add('hidden');
-    document.body.style.overflow = '';
-    alertEl.innerHTML = '';
-
-    // Load data now that user is authenticated
-    loadCategories();
-    showSection('home');
-  })
-  .catch(function(error) {
-    alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
-    resetCaptcha('registerCaptcha');
-  });
+    .then(function (data) {
+      // Cognito has emailed a confirmation code. Tell the user.
+      alertEl.innerHTML = '<div class="alert alert-info">' +
+        'Account created. We emailed a confirmation code to ' +
+        escapeHtml(email) + '. Confirm your address, then sign in.' +
+        '</div>';
+      // Switch back to login view after a beat so the user can log in.
+      setTimeout(function () {
+        showAuthView('login');
+        document.getElementById('loginEmail').value = email;
+      }, 1500);
+    })
+    .catch(function (error) {
+      alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
+      resetCaptcha('registerCaptcha');
+    });
 }
 
 // Handle Forgot Password
@@ -731,7 +807,7 @@ function handleForgotPasswordSubmit(email) {
   // Save email for resend
   lastForgotEmail = email;
 
-  api('/api/portal/auth/forgot-password', {
+  api('/api/auth/forgot-password', {
     method: 'POST',
     body: JSON.stringify(requestBody)
   })
@@ -746,19 +822,11 @@ function handleForgotPasswordSubmit(email) {
 
 // Logout
 function logout() {
-  // Call server logout to invalidate token and clear cookie
-  api('/api/portal/auth/logout', { method: 'POST' })
-    .catch(function() {
-      // Ignore errors, still clear local state
-    })
-    .finally(function() {
-      token = null;
-      user = null;
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      updateAuthUI();
+  api('/api/auth/logout', { method: 'POST' })
+    .catch(function () { /* ignore — still clear local */ })
+    .finally(function () {
+      clearAuthState();
       showSection('home');
-      // Show login modal since authentication is required
       openAuthModal('login');
     });
 }

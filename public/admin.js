@@ -1,6 +1,7 @@
 var API_URL = '';
-var token = localStorage.getItem('adminToken'); // Backward compat
-var adminUser = JSON.parse(localStorage.getItem('adminUser') || 'null');
+// Unified token storage shared with /index.html (the single login entry point).
+var token = localStorage.getItem('lsAccessToken');
+var adminUser = JSON.parse(localStorage.getItem('lsUser') || 'null');
 
 // Data cache
 var products = [];
@@ -17,36 +18,24 @@ document.addEventListener('DOMContentLoaded', function() {
   checkAuthStatus();
 });
 
-// Check authentication status
+// Check authentication status. /admin.html is dashboard-only; the single
+// login entry point is /. If we don't have an access token + admin claim,
+// bounce the user there.
 function checkAuthStatus() {
-  api('/api/portal/me')
-    .then(function(data) {
-      if (data.isAdmin) {
-        adminUser = data;
-        localStorage.setItem('adminUser', JSON.stringify(adminUser));
-        showAdminInterface();
-        loadDashboard();
-      } else {
-        showSection('login');
-        showAlert('loginAlert', 'Admin access required', 'error');
-      }
-    })
-    .catch(function() {
-      // Not authenticated
-      if (token && adminUser) {
-        // Try with stored token
-        showAdminInterface();
-        loadDashboard();
-      } else {
-        showSection('login');
-      }
-    });
+  if (token && adminUser && adminUser.isAdmin && adminUser.pool === 'staff') {
+    showAdminInterface();
+    loadDashboard();
+    return;
+  }
+  showSection('login');
+  // Tiny delay so the user briefly sees the redirect message.
+  setTimeout(function () {
+    window.location.href = '/';
+  }, 250);
 }
 
 // Bind Events
 function bindEvents() {
-  // Login form
-  document.getElementById('loginForm').addEventListener('submit', handleLogin);
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
   // Sidebar navigation
@@ -220,11 +209,20 @@ function api(endpoint, options) {
     method: options.method || 'GET',
     headers: headers,
     body: options.body,
-    credentials: 'include' // Send cookies with requests
+    credentials: 'include'
   })
   .then(function(response) {
     return response.json().then(function(data) {
       if (!response.ok) {
+        // Bounce back to / on auth failure — admin tokens expire ~1h.
+        if ((response.status === 401 || response.status === 403) && token) {
+          token = null;
+          adminUser = null;
+          localStorage.removeItem('lsAccessToken');
+          localStorage.removeItem('lsRefreshToken');
+          localStorage.removeItem('lsUser');
+          window.location.href = '/';
+        }
         throw new Error(data.error || 'Request failed');
       }
       return data;
@@ -253,51 +251,17 @@ function showAdminInterface() {
   if (firstLink) firstLink.classList.add('active');
 }
 
-// Handle Login
-function handleLogin(e) {
-  e.preventDefault();
-  var alertEl = document.getElementById('loginAlert');
-  var email = document.getElementById('loginEmail').value;
-  var password = document.getElementById('loginPassword').value;
-
-  api('/api/portal/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email: email, password: password })
-  })
-  .then(function(data) {
-    if (!data.customer.isAdmin) {
-      alertEl.innerHTML = '<div class="alert alert-error">Access denied. Admin privileges required.</div>';
-      return;
-    }
-
-    token = data.token;
-    adminUser = data.customer;
-    localStorage.setItem('adminToken', token);
-    localStorage.setItem('adminUser', JSON.stringify(adminUser));
-
-    showAdminInterface();
-    loadDashboard();
-  })
-  .catch(function(error) {
-    alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
-  });
-}
-
-// Logout
+// Logout — clears unified token storage and bounces back to /.
 function logout() {
-  // Call server logout to invalidate token and clear cookie
-  api('/api/portal/auth/logout', { method: 'POST' })
-    .catch(function() {
-      // Ignore errors, still clear local state
-    })
-    .finally(function() {
+  api('/api/auth/logout', { method: 'POST' })
+    .catch(function () { /* ignore — still clear local state */ })
+    .finally(function () {
       token = null;
       adminUser = null;
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('adminUser');
-      document.querySelector('.sidebar').style.display = 'none';
-      document.getElementById('adminNav').classList.add('hidden');
-      showSection('login');
+      localStorage.removeItem('lsAccessToken');
+      localStorage.removeItem('lsRefreshToken');
+      localStorage.removeItem('lsUser');
+      window.location.href = '/';
     });
 }
 

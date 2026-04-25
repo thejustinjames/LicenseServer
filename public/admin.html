@@ -84,22 +84,13 @@
     </aside>
 
     <main class="admin-main">
-      <!-- Login Section -->
+      <!-- Auth gate: when not signed in this section is shown briefly,
+           then admin.js redirects to / for the unified login. -->
       <section id="login" class="admin-section active">
         <div class="auth-container">
-          <h2>Admin Login</h2>
-          <div id="loginAlert"></div>
-          <form id="loginForm">
-            <div class="form-group">
-              <label for="loginEmail">Email</label>
-              <input type="email" id="loginEmail" required placeholder="admin@example.com">
-            </div>
-            <div class="form-group">
-              <label for="loginPassword">Password</label>
-              <input type="password" id="loginPassword" required placeholder="Password">
-            </div>
-            <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
-          </form>
+          <h2>Admin sign-in required</h2>
+          <p>Redirecting to the sign-in page…</p>
+          <p><a href="/" class="btn btn-primary">Go to sign-in</a></p>
         </div>
       </section>
 
