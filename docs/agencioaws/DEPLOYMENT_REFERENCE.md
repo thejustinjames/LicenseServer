@@ -343,7 +343,44 @@ aws ecr describe-images --region ap-southeast-1 \
 
 ---
 
-## 7. Deploy / update flow
+## 7. CI/CD
+
+**Status as of 2026-04-25: there is no automated CI/CD for the License Server.**
+
+What was checked and found absent:
+
+| System | Result |
+|---|---|
+| `.github/workflows/` | does not exist in the repo |
+| Jenkinsfile / `.gitlab-ci.yml` / `azure-pipelines.yml` / `buildspec.yml` | none present |
+| AWS CodeBuild projects (account `772693061584`, `ap-southeast-1`) | no project matching `licens*` |
+| AWS CodePipeline pipelines | no pipeline matching `licens*` |
+| ArgoCD / Flux GitOps | not in use for this workload |
+| ECR push history | one image pushed manually on 2026-04-24 (tags `latest`, `dev`, `dev-2`, digest `sha256:1eedd181…dd2c3ee`) |
+
+Implications:
+- Image promotion is **manual**: build locally → `docker push` to ECR → `kubectl rollout restart` (or re-`apply -k`) on the cluster.
+- The `latest` tag is mutable and is what the live deployment pulls
+  (`imagePullPolicy: Always`), so a fresh push + rollout restart updates prod.
+- There is **no test gate, no security scan, no signing, no GitOps reconciliation** between repo state and cluster state.
+- Drift between `k8s/eks/*.yaml` in git and what is actually applied is possible
+  and not currently detected. `kubectl diff -k k8s/eks/` from the bastion is the
+  way to check.
+
+If/when CI/CD is added, the natural shape (matching the rest of the Agencio
+estate) would be:
+1. **GitHub Actions** workflow on push to `main`:
+   - `npm ci && npm test && npx prisma validate`
+   - `docker build -f Dockerfile.eks` → push to ECR with tag `git-${SHA}` and `latest`.
+   - Authenticate to AWS via OIDC role (no long-lived keys).
+2. **Deploy step**: either
+   - `aws eks update-kubeconfig` + `kubectl set image deploy/license-server …:git-${SHA}` + `kubectl rollout status`, or
+   - commit the new tag into `k8s/eks/kustomization.yaml` (`images.newTag`) and let an ArgoCD app reconcile it.
+3. **Migrations**: a separate Job (or `prisma migrate deploy` init container) gated on the new image, before pods serve traffic.
+
+Until that exists, treat any deploy as a manual change-controlled action.
+
+## 8. Deploy / update flow (manual, current process)
 
 The end-to-end flow used today (from this repo on the bastion or from a dev
 machine with AWS + kubectl + docker access):
@@ -374,7 +411,7 @@ $KCTL rollout undo    deploy/license-server -n preprod
 
 ---
 
-## 8. Common troubleshooting
+## 9. Common troubleshooting
 
 | Symptom | First checks |
 |---|---|
@@ -388,7 +425,7 @@ $KCTL rollout undo    deploy/license-server -n preprod
 
 ---
 
-## 9. Files & references
+## 10. Files & references
 
 - Helm/manifests: `k8s/eks/`
 - Build script: `k8s/eks/deploy.sh`
