@@ -450,4 +450,5 @@ $KCTL rollout undo    deploy/license-server -n preprod
 - Existing public deployment guide: `docs/EKS-DEPLOYMENT.md` (template/how-to)
 - Customer Cognito + MFA: `docs/agencioaws/CUSTOMER_AUTH.md`
 - Admin Cognito + MFA:    `docs/agencioaws/ADMIN_AUTH.md`
+- Test data + test-license generation: `docs/agencioaws/TEST_DATA.md`
 - This document: `docs/agencioaws/DEPLOYMENT_REFERENCE.md` (live state, 2026-04-25)

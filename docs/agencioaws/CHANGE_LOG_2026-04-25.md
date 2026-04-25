@@ -75,7 +75,9 @@ icon that surfaces `/admin.html` only for admin users.
 | `docs/agencioaws/DEPLOYMENT_REFERENCE.md` | Updated — Cognito section now lists both pools, customer pool, app clients, license-admins group, MFA enforcement, and pointers to the two new docs. |
 | `docs/agencioaws/CUSTOMER_AUTH.md` | **new** — full pool/clients/IAM/secrets layout, code change index, endpoint table, deploy steps, bastion verification, ops cheat-sheet, threat-model notes. |
 | `docs/agencioaws/ADMIN_AUTH.md` | **new** — staff pool admin group, license-server-admin client, full first-login UX, app-layer MFA enforcement (`PreferredMfaSetting`), bootstrap of first admin out-of-band, ops cheat-sheet. |
+| `docs/agencioaws/TEST_DATA.md` | **new** — test SKUs, sample licenses per tier, activation/seat policy, admin "Generate Test License" button, `POST /api/admin/licenses/test` endpoint, cleanup SQL. |
 | `docs/agencioaws/CHANGE_LOG_2026-04-25.md` | **new** — this file. |
+| `licensing_seeds/README.md` | **new** — folder of CommonJS seeders that can be piped into a running pod (no TypeScript build step needed). |
 
 ### 2.5 Deployment
 
