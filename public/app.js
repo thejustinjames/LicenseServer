@@ -638,11 +638,38 @@ function showLoginMfaStep() {
   document.getElementById('loginEmailGroup').classList.add('hidden');
   document.getElementById('loginPasswordGroup').classList.add('hidden');
   document.getElementById('loginTotpGroup').classList.remove('hidden');
+  // Captcha already passed at the password step — hide the widget so the
+  // user doesn't see (or have to re-solve) it during MFA.
+  var capEl = document.getElementById('loginCaptcha');
+  if (capEl) capEl.classList.add('hidden');
   document.getElementById('loginSubmitBtn').textContent = 'Verify code';
-  setTimeout(function () {
-    var totp = document.getElementById('loginTotp');
-    if (totp) totp.focus();
-  }, 0);
+  var totp = document.getElementById('loginTotp');
+  if (totp) {
+    setTimeout(function () { totp.focus(); }, 0);
+    // Auto-submit the MFA step the moment 6 digits are entered, so users
+    // don't have to also click "Verify code". Tolerant of accidental
+    // characters: strips non-digits before checking length.
+    if (!totp._autoSubmitWired) {
+      totp._autoSubmitWired = true;
+      totp.addEventListener('input', function () {
+        var digits = (totp.value || '').replace(/\D+/g, '');
+        if (digits.length > 6) digits = digits.slice(0, 6);
+        if (digits !== totp.value) totp.value = digits;
+        if (digits.length === 6 && pendingMfa) {
+          // Submit through the form so handleLogin runs with the same
+          // event flow as a manual click.
+          var form = document.getElementById('loginForm');
+          if (form && typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+          } else if (form) {
+            // Fallback for older browsers that lack requestSubmit().
+            var btn = document.getElementById('loginSubmitBtn');
+            if (btn) btn.click();
+          }
+        }
+      });
+    }
+  }
 }
 
 function resetLoginForm() {
@@ -650,6 +677,8 @@ function resetLoginForm() {
   document.getElementById('loginEmailGroup').classList.remove('hidden');
   document.getElementById('loginPasswordGroup').classList.remove('hidden');
   document.getElementById('loginTotpGroup').classList.add('hidden');
+  var capEl = document.getElementById('loginCaptcha');
+  if (capEl) capEl.classList.remove('hidden');
   var pw = document.getElementById('loginPassword');
   var totp = document.getElementById('loginTotp');
   if (pw) pw.value = '';
@@ -703,11 +732,20 @@ function handleLogin(event) {
   // Password step
   var email = (document.getElementById('loginEmail').value || '').trim();
   var password = document.getElementById('loginPassword').value;
+  var captchaToken = getCaptchaToken('loginCaptcha');
+
+  if (captchaConfig.enabled && !captchaToken) {
+    alertEl.innerHTML = '<div class="alert alert-error">Please complete the human-verification check.</div>';
+    return;
+  }
+
+  var loginBody = { email: email, password: password };
+  if (captchaToken) loginBody.captchaToken = captchaToken;
 
   fetch(API_URL + '/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email, password: password })
+    body: JSON.stringify(loginBody)
   })
     .then(function (resp) {
       return resp.json().then(function (data) {

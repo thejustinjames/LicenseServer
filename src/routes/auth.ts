@@ -20,6 +20,7 @@ import { clearSession } from '../config/redis.js';
 import { passwordSchema } from '../utils/password.js';
 import * as adminAuth from '../services/adminCognito.service.js';
 import * as customerAuth from '../services/customerCognito.service.js';
+import * as captchaService from '../services/captcha.service.js';
 import { logger } from '../services/logger.service.js';
 
 const router = Router();
@@ -48,6 +49,9 @@ function poolForEmail(email: string): Pool {
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  // hCaptcha token from the login form. Required when CAPTCHA is enabled
+  // (HCAPTCHA_SITE_KEY + HCAPTCHA_SECRET_KEY set); ignored otherwise.
+  captchaToken: z.string().min(1).optional(),
 });
 const mfaSchema = z.object({
   email: z.string().email(),
@@ -72,9 +76,31 @@ const resetSchema = z.object({
 });
 const tokenOnly = z.object({ accessToken: z.string().min(1).optional() });
 
+// Captcha-config endpoint so the login form on `/index.html` can decide
+// whether to render the hCaptcha widget. Mirrors the existing
+// `/api/portal/auth/captcha-config` so frontend code can use either.
+router.get('/captcha-config', (_req, res: Response) => {
+  res.json({
+    enabled: captchaService.isCaptchaEnabled(),
+    siteKey: captchaService.getCaptchaSiteKey(),
+  });
+});
+
 router.post('/login', authRateLimit, async (req, res: Response) => {
   try {
     const data = loginSchema.parse(req.body);
+
+    // CAPTCHA gate — only the password step requires it. The MFA challenge
+    // step that follows is already gated by the Cognito session token, so
+    // we don't ask the user to re-solve a captcha mid-login.
+    if (captchaService.isCaptchaEnabled()) {
+      const ok = await captchaService.verifyCaptcha(data.captchaToken);
+      if (!ok) {
+        res.status(400).json({ error: 'CAPTCHA verification failed' });
+        return;
+      }
+    }
+
     const pool = poolForEmail(data.email);
 
     if (pool === 'staff') {
