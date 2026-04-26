@@ -80,6 +80,15 @@
           </svg>
           Coupons
         </a>
+        <hr style="border-color: rgba(255,255,255,0.1); margin: 1rem 0;">
+        <a href="#" class="sidebar-link" data-section="silo-tiers">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+            <path d="M2 17l10 5 10-5"></path>
+            <path d="M2 12l10 5 10-5"></path>
+          </svg>
+          SILO Tiers
+        </a>
       </nav>
     </aside>
 
@@ -324,6 +333,252 @@
               </tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <!-- SILO Tiers Section -->
+      <section id="silo-tiers" class="admin-section">
+        <div class="section-header">
+          <h1>SILO License Tiers</h1>
+          <button class="btn btn-primary" id="seedSiloProductsBtn">Seed SILO Products</button>
+        </div>
+
+        <!-- Pricing Matrix -->
+        <div class="silo-pricing-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+
+          <!-- Home Tier -->
+          <div class="tier-card" style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); border-radius: 12px; padding: 1.5rem; border: 1px solid #475569;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+              <h3 style="margin: 0; color: #f8fafc;">SILO Home</h3>
+              <span style="background: #3b82f6; color: white; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem;">Standalone</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #22d3ee; margin-bottom: 0.5rem;">$29.99<span style="font-size: 1rem; color: #94a3b8;">/year</span></div>
+            <ul style="list-style: none; padding: 0; margin: 1rem 0; color: #cbd5e1; font-size: 0.875rem;">
+              <li style="margin-bottom: 0.5rem;">&#10003; 1 machine</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; 7-day trial</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Local TDS engine</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Guardian basic</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Observe/Restrict only</li>
+              <li style="margin-bottom: 0.5rem; color: #64748b;">&#10007; No cloud LLM</li>
+            </ul>
+            <button class="btn btn-secondary btn-sm" onclick="createSiloProduct('home')" style="width: 100%;">Create Product</button>
+          </div>
+
+          <!-- Professional Tier -->
+          <div class="tier-card" style="background: linear-gradient(135deg, #1e3a5f 0%, #1e4d7b 100%); border-radius: 12px; padding: 1.5rem; border: 1px solid #3b82f6;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+              <h3 style="margin: 0; color: #f8fafc;">SILO Professional</h3>
+              <span style="background: #3b82f6; color: white; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem;">Standalone</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #22d3ee; margin-bottom: 0.5rem;">$49.99<span style="font-size: 1rem; color: #94a3b8;">/year</span></div>
+            <ul style="list-style: none; padding: 0; margin: 1rem 0; color: #cbd5e1; font-size: 0.875rem;">
+              <li style="margin-bottom: 0.5rem;">&#10003; 2 machines</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; 14-day trial</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; All response levels</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Cloud LLM providers</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Service mode</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; 30-day retention</li>
+            </ul>
+            <button class="btn btn-secondary btn-sm" onclick="createSiloProduct('professional')" style="width: 100%;">Create Product</button>
+          </div>
+
+          <!-- Business Tier -->
+          <div class="tier-card" style="background: linear-gradient(135deg, #1e293b 0%, #312e81 100%); border-radius: 12px; padding: 1.5rem; border: 1px solid #6366f1;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+              <h3 style="margin: 0; color: #f8fafc;">SILO Business</h3>
+              <span style="background: #8b5cf6; color: white; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem;">Cortex</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #a78bfa; margin-bottom: 0.5rem;">$499.99<span style="font-size: 1rem; color: #94a3b8;">/year</span></div>
+            <ul style="list-style: none; padding: 0; margin: 1rem 0; color: #cbd5e1; font-size: 0.875rem;">
+              <li style="margin-bottom: 0.5rem;">&#10003; 5 machines + Cortex</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; No trial</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Central dashboard</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Local LLM only</li>
+              <li style="margin-bottom: 0.5rem; color: #f87171;">&#10007; No Docker/K8s</li>
+              <li style="margin-bottom: 0.5rem; color: #f87171;">&#10007; No Federation/SSO</li>
+            </ul>
+            <button class="btn btn-secondary btn-sm" onclick="createSiloProduct('business')" style="width: 100%;">Create Product</button>
+          </div>
+
+          <!-- Enterprise Tier -->
+          <div class="tier-card" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 12px; padding: 1.5rem; border: 2px solid #f59e0b;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+              <h3 style="margin: 0; color: #f8fafc;">SILO Enterprise</h3>
+              <span style="background: #f59e0b; color: black; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: bold;">Full Suite</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #fbbf24; margin-bottom: 0.5rem;">$899.99<span style="font-size: 1rem; color: #94a3b8;">/year</span></div>
+            <ul style="list-style: none; padding: 0; margin: 1rem 0; color: #cbd5e1; font-size: 0.875rem;">
+              <li style="margin-bottom: 0.5rem;">&#10003; 20 machines + Cortex</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; All features enabled</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Cloud LLM + AI Brain</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Docker/K8s/VMware</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; Federation + SSO</li>
+              <li style="margin-bottom: 0.5rem;">&#10003; SIEM + GTN + Custom Rules</li>
+            </ul>
+            <button class="btn btn-primary btn-sm" onclick="createSiloProduct('enterprise')" style="width: 100%;">Create Product</button>
+          </div>
+        </div>
+
+        <!-- License Packs -->
+        <h2 style="margin-bottom: 1rem;">License Packs (Add-ons)</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+          <div style="background: #1e293b; border-radius: 8px; padding: 1rem; border: 1px solid #475569; text-align: center;">
+            <h4 style="margin: 0 0 0.5rem 0; color: #f8fafc;">Pack 5</h4>
+            <div style="font-size: 1.5rem; font-weight: bold; color: #22d3ee;">$99<span style="font-size: 0.875rem; color: #94a3b8;">/yr</span></div>
+            <p style="color: #94a3b8; font-size: 0.875rem; margin: 0.5rem 0;">+5 machines</p>
+            <button class="btn btn-secondary btn-sm" onclick="createSiloProduct('pack5')" style="width: 100%;">Create</button>
+          </div>
+          <div style="background: #1e293b; border-radius: 8px; padding: 1rem; border: 1px solid #475569; text-align: center;">
+            <h4 style="margin: 0 0 0.5rem 0; color: #f8fafc;">Pack 10</h4>
+            <div style="font-size: 1.5rem; font-weight: bold; color: #22d3ee;">$179<span style="font-size: 0.875rem; color: #94a3b8;">/yr</span></div>
+            <p style="color: #94a3b8; font-size: 0.875rem; margin: 0.5rem 0;">+10 machines</p>
+            <button class="btn btn-secondary btn-sm" onclick="createSiloProduct('pack10')" style="width: 100%;">Create</button>
+          </div>
+          <div style="background: #1e293b; border-radius: 8px; padding: 1rem; border: 1px solid #475569; text-align: center;">
+            <h4 style="margin: 0 0 0.5rem 0; color: #f8fafc;">Pack 20</h4>
+            <div style="font-size: 1.5rem; font-weight: bold; color: #22d3ee;">$350<span style="font-size: 0.875rem; color: #94a3b8;">/yr</span></div>
+            <p style="color: #94a3b8; font-size: 0.875rem; margin: 0.5rem 0;">+20 machines</p>
+            <button class="btn btn-secondary btn-sm" onclick="createSiloProduct('pack20')" style="width: 100%;">Create</button>
+          </div>
+        </div>
+
+        <!-- Enterprise Features Matrix -->
+        <h2 style="margin-bottom: 1rem;">Enterprise Feature Matrix</h2>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Feature</th>
+                <th style="text-align: center;">Home</th>
+                <th style="text-align: center;">Pro</th>
+                <th style="text-align: center;">Business</th>
+                <th style="text-align: center;">Enterprise</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Cloud LLM</strong> (OpenAI, Anthropic, Gemini)</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>AI Brain</strong> (Autonomous Mode)</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>Docker Agent</strong></td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>k8inspector</strong> (Kubernetes)</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>VMware L1 Phantom Visor</strong></td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>Child Cortex</strong> (Federation)</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>SSO</strong> (SAML/OIDC)</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>SIEM Integration</strong> (Splunk, Elastic, Sentinel)</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>Webhook/SOAR</strong></td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>GTN Access</strong> (Global Threat Network)</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>Custom Detection Rules</strong></td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>Extended Audit Log</strong></td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>Compliance Reports</strong> (SOC2, ISO27001)</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+              <tr>
+                <td><strong>White-Label Branding</strong></td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #f87171;">&#10007;</td>
+                <td style="text-align: center; color: #4ade80;">&#10003;</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Feature Flag Reference -->
+        <h2 style="margin: 2rem 0 1rem 0;">Feature Flags Reference</h2>
+        <div style="background: #1e293b; border-radius: 8px; padding: 1rem; font-family: monospace; font-size: 0.875rem; color: #e2e8f0; overflow-x: auto;">
+          <pre style="margin: 0; white-space: pre-wrap;">// Enterprise features (silo-license/src/types.rs)
+enum EnterpriseFeature {
+    CloudLlm,           // cloud_llm
+    AiBrain,            // ai_brain
+    DockerAgent,        // docker_agent
+    K8Inspector,        // k8inspector
+    VmwarePhantomVisor, // vmware_phantom_visor
+    ChildCortex,        // child_cortex
+    MultiTenant,        // multi_tenant
+    Sso,                // sso
+    SiemIntegration,    // siem_integration
+    WebhookSoar,        // webhook_soar
+    GtnAccess,          // gtn_access
+    CustomDetectionRules, // custom_detection_rules
+    ExtendedAuditLog,   // extended_audit_log
+    ComplianceReports,  // compliance_reports
+    WhiteLabel,         // white_label
+}</pre>
         </div>
       </section>
     </main>
@@ -656,5 +911,162 @@
   </div>
 
   <script src="/admin.js"></script>
+  <script>
+    // SILO Product Definitions
+    const SILO_PRODUCTS = {
+      home: {
+        name: 'SILO Home',
+        description: 'Standalone SILO for personal use. 1 machine, 7-day trial. Includes local TDS engine, Guardian basic, HAL attestation. Observe/Restrict responses only.',
+        category: 'silo',
+        features: ['standalone-mode', 'local-tds-engine', 'guardian-basic', 'hal-attestation', 'offline-mode', '7-day-retention', 'observe-restrict-only'],
+        priceCents: 2999,
+        interval: 'year',
+        maxActivations: 1,
+        trialDays: 7,
+      },
+      professional: {
+        name: 'SILO Professional',
+        description: 'SILO Professional with cloud LLM support. 2 machines, 14-day trial. All response levels, service mode, 30-day retention.',
+        category: 'silo',
+        features: ['standalone-mode', 'local-tds-engine', 'guardian-full', 'hal-attestation', 'all-response-levels', 'cloud_llm', 'local-llm-support', 'service-mode', '30-day-retention'],
+        priceCents: 4999,
+        interval: 'year',
+        maxActivations: 2,
+        trialDays: 14,
+      },
+      business: {
+        name: 'SILO Business',
+        description: 'SILO with Cortex central management. 5 machines, no trial. Local LLM only. Excludes: Cloud LLM, Docker, K8s, VMware, Federation, SSO, SIEM, Webhooks, GTN, Custom Rules.',
+        category: 'silo',
+        features: ['cortex', 'sidecar-management', 'eventbus', 'central-dashboard', 'real-time-monitoring', 'tds-engine', 'correlation-engine', 'all-response-levels', 'guardian-full', 'hal-attestation', 'local-llm-only', 'local-auth', '90-day-retention', 'priority-support', 'basic-reporting'],
+        priceCents: 49999,
+        interval: 'year',
+        maxActivations: 5,
+        trialDays: 0,
+      },
+      enterprise: {
+        name: 'SILO Enterprise',
+        description: 'Full SILO suite with all features. 20 machines, no trial. Cloud LLM, AI Brain, Docker, K8s, VMware L1, Federation, SSO, SIEM, Webhooks, GTN, Custom Detection Rules.',
+        category: 'silo',
+        features: ['cortex', 'sidecar-management', 'eventbus', 'central-dashboard', 'real-time-monitoring', 'tds-engine', 'correlation-engine', 'all-response-levels', 'guardian-full', 'hal-attestation', 'cloud_llm', 'ai_brain', 'local-llm-support', 'docker_agent', 'k8inspector', 'vmware_phantom_visor', 'child_cortex', 'multi_tenant', 'local-auth', 'sso', 'siem_integration', 'webhook_soar', 'gtn_access', 'custom_detection_rules', '365-day-retention', 'extended_audit_log', 'compliance_reports', 'dedicated-support', 'sla'],
+        priceCents: 89999,
+        interval: 'year',
+        maxActivations: 20,
+        trialDays: 0,
+      },
+      pack5: {
+        name: 'SILO License Pack 5',
+        description: 'Add 5 additional machines to your SILO Business or Enterprise license.',
+        category: 'silo-addons',
+        features: ['license-pack', 'addon', 'requires-business-or-enterprise'],
+        priceCents: 9900,
+        interval: 'year',
+        maxActivations: 5,
+        trialDays: 0,
+      },
+      pack10: {
+        name: 'SILO License Pack 10',
+        description: 'Add 10 additional machines to your SILO Business or Enterprise license.',
+        category: 'silo-addons',
+        features: ['license-pack', 'addon', 'requires-business-or-enterprise'],
+        priceCents: 17900,
+        interval: 'year',
+        maxActivations: 10,
+        trialDays: 0,
+      },
+      pack20: {
+        name: 'SILO License Pack 20',
+        description: 'Add 20 additional machines to your SILO Business or Enterprise license.',
+        category: 'silo-addons',
+        features: ['license-pack', 'addon', 'requires-business-or-enterprise'],
+        priceCents: 35000,
+        interval: 'year',
+        maxActivations: 20,
+        trialDays: 0,
+      },
+    };
+
+    // Create a SILO product
+    async function createSiloProduct(tier) {
+      const product = SILO_PRODUCTS[tier];
+      if (!product) {
+        alert('Unknown product tier: ' + tier);
+        return;
+      }
+
+      const token = localStorage.getItem('adminToken');
+      if (!token) {
+        alert('Please login first');
+        return;
+      }
+
+      if (!confirm(`Create ${product.name} ($${(product.priceCents / 100).toFixed(2)}/year)?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/products', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: product.name,
+            description: product.description,
+            category: product.category,
+            features: product.features,
+            purchaseType: 'SUBSCRIPTION',
+            pricingType: 'FIXED',
+            validationMode: 'HYBRID',
+            licenseDurationDays: 365,
+            createStripeProduct: true,
+            stripePrice: product.priceCents,
+            stripeCurrency: 'usd',
+            stripeInterval: product.interval,
+          }),
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+          alert(`${product.name} created successfully!`);
+          // Reload products if on products page
+          if (typeof loadProducts === 'function') {
+            loadProducts();
+          }
+        } else {
+          alert('Error: ' + (data.error || 'Failed to create product'));
+        }
+      } catch (err) {
+        alert('Error creating product: ' + err.message);
+      }
+    }
+
+    // Seed all SILO products
+    document.getElementById('seedSiloProductsBtn')?.addEventListener('click', async () => {
+      if (!confirm('This will create all SILO products (Home, Professional, Business, Enterprise, and License Packs). Continue?')) {
+        return;
+      }
+
+      const tiers = ['home', 'professional', 'business', 'enterprise', 'pack5', 'pack10', 'pack20'];
+      let created = 0;
+      let errors = [];
+
+      for (const tier of tiers) {
+        try {
+          await createSiloProduct(tier);
+          created++;
+        } catch (err) {
+          errors.push(`${tier}: ${err.message}`);
+        }
+      }
+
+      if (errors.length > 0) {
+        alert(`Created ${created} products.\n\nErrors:\n${errors.join('\n')}`);
+      } else {
+        alert(`Successfully created all ${created} SILO products!`);
+      }
+    });
+  </script>
 </body>
 </html>

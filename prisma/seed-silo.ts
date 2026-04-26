@@ -12,178 +12,444 @@ interface SiloProduct {
   priceMonthly: number | null;
   priceAnnual: number | null;
   licenseDurationDays: number | null;
+  trialDays: number | null;
+  maxMachines: number;
   features: string[];
   s3PackageKey: string | null;
   version: string | null;
 }
 
-// SILO product tiers with SGD pricing (stored in cents)
+// SILO product tiers with USD pricing (stored in cents)
+// Feature flags match silo-license/src/types.rs AllowedFeatures struct
 const siloProducts: SiloProduct[] = [
-  // Home Editions - One-time purchase
+  // ============================================
+  // SILO Home - $29.99/year, 1 machine, 7-day trial
+  // ============================================
   {
     name: 'SILO Home - Windows',
     description: 'Standalone SILO for Windows. Perfect for personal security research and learning.',
     category: 'silo',
-    purchaseType: 'ONE_TIME',
+    purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'HYBRID',
-    priceMonthly: 9900,       // SGD 99.00 one-time
-    priceAnnual: null,
-    licenseDurationDays: 365, // 1 year license
-    features: ['windows-x64', 'basic-modules', 'offline-mode', 'community-support', '1-machine'],
-    s3PackageKey: 'silo/windows/silo-home-windows-x64.zip',
-    version: '1.0.0',
+    priceMonthly: null,
+    priceAnnual: 2999,        // USD $29.99/year
+    licenseDurationDays: 365,
+    trialDays: 7,
+    maxMachines: 1,
+    features: [
+      'windows-x64',
+      'windows-arm64',
+      'standalone-mode',
+      'local-tds-engine',
+      'guardian-basic',
+      'hal-attestation',
+      'offline-mode',
+      'community-support',
+      '7-day-retention',
+      'observe-restrict-only',  // Home edition limited to OBSERVE/RESTRICT responses
+    ],
+    s3PackageKey: 'silo/windows/silo-home-windows.zip',
+    version: '1.3.0',
   },
   {
     name: 'SILO Home - macOS',
-    description: 'Standalone SILO for macOS Apple Silicon. Perfect for personal security research and learning.',
+    description: 'Standalone SILO for macOS (Intel & Apple Silicon). Perfect for personal security research and learning.',
     category: 'silo',
-    purchaseType: 'ONE_TIME',
+    purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'HYBRID',
-    priceMonthly: 9900,       // SGD 99.00 one-time
-    priceAnnual: null,
-    licenseDurationDays: 365, // 1 year license
-    features: ['macos-arm64', 'basic-modules', 'offline-mode', 'community-support', '1-machine'],
-    s3PackageKey: 'silo/macos/silo-home-macos-arm64.zip',
-    version: '1.0.0',
+    priceMonthly: null,
+    priceAnnual: 2999,        // USD $29.99/year
+    licenseDurationDays: 365,
+    trialDays: 7,
+    maxMachines: 1,
+    features: [
+      'macos-x64',
+      'macos-arm64',
+      'standalone-mode',
+      'local-tds-engine',
+      'guardian-basic',
+      'hal-attestation',
+      'secure-enclave-t15',   // Apple Silicon T1.5 tier
+      'offline-mode',
+      'community-support',
+      '7-day-retention',
+      'observe-restrict-only',
+    ],
+    s3PackageKey: 'silo/macos/silo-home-macos.zip',
+    version: '1.3.0',
   },
-  // Business Edition - Subscription
+  {
+    name: 'SILO Home - Linux',
+    description: 'Standalone SILO for Linux. Perfect for personal security research and learning.',
+    category: 'silo',
+    purchaseType: 'SUBSCRIPTION',
+    pricingType: 'FIXED',
+    validationMode: 'HYBRID',
+    priceMonthly: null,
+    priceAnnual: 2999,        // USD $29.99/year
+    licenseDurationDays: 365,
+    trialDays: 7,
+    maxMachines: 1,
+    features: [
+      'linux-x64',
+      'linux-arm64',
+      'standalone-mode',
+      'local-tds-engine',
+      'guardian-basic',
+      'hal-attestation',
+      'offline-mode',
+      'community-support',
+      '7-day-retention',
+      'observe-restrict-only',
+    ],
+    s3PackageKey: 'silo/linux/silo-home-linux.zip',
+    version: '1.3.0',
+  },
+
+  // ============================================
+  // SILO Professional - $49.99/year, 2 machines, 14-day trial
+  // ============================================
+  {
+    name: 'SILO Professional - Windows',
+    description: 'SILO Professional for Windows. Full standalone features with extended retention and all response levels.',
+    category: 'silo',
+    purchaseType: 'SUBSCRIPTION',
+    pricingType: 'FIXED',
+    validationMode: 'HYBRID',
+    priceMonthly: null,
+    priceAnnual: 4999,        // USD $49.99/year
+    licenseDurationDays: 365,
+    trialDays: 14,
+    maxMachines: 2,
+    features: [
+      'windows-x64',
+      'windows-arm64',
+      'standalone-mode',
+      'local-tds-engine',
+      'guardian-full',
+      'hal-attestation',
+      'all-response-levels',  // Professional: OBSERVE, RESTRICT, ISOLATE, TERMINATE
+      'cloud_llm',            // Professional gets cloud LLM (OpenAI, Anthropic, Gemini)
+      'local-llm-support',    // Also supports Ollama/LMStudio
+      'service-mode',         // Can run as Windows Service
+      'offline-mode',
+      'email-support',
+      '30-day-retention',
+    ],
+    s3PackageKey: 'silo/windows/silo-professional-windows.zip',
+    version: '1.3.0',
+  },
+  {
+    name: 'SILO Professional - macOS',
+    description: 'SILO Professional for macOS. Full standalone features with extended retention and all response levels.',
+    category: 'silo',
+    purchaseType: 'SUBSCRIPTION',
+    pricingType: 'FIXED',
+    validationMode: 'HYBRID',
+    priceMonthly: null,
+    priceAnnual: 4999,        // USD $49.99/year
+    licenseDurationDays: 365,
+    trialDays: 14,
+    maxMachines: 2,
+    features: [
+      'macos-x64',
+      'macos-arm64',
+      'standalone-mode',
+      'local-tds-engine',
+      'guardian-full',
+      'hal-attestation',
+      'secure-enclave-t15',
+      'all-response-levels',
+      'cloud_llm',            // Professional gets cloud LLM
+      'local-llm-support',
+      'launchd-service',      // Can run as launchd service
+      'offline-mode',
+      'email-support',
+      '30-day-retention',
+    ],
+    s3PackageKey: 'silo/macos/silo-professional-macos.zip',
+    version: '1.3.0',
+  },
+  {
+    name: 'SILO Professional - Linux',
+    description: 'SILO Professional for Linux. Full standalone features with extended retention and all response levels.',
+    category: 'silo',
+    purchaseType: 'SUBSCRIPTION',
+    pricingType: 'FIXED',
+    validationMode: 'HYBRID',
+    priceMonthly: null,
+    priceAnnual: 4999,        // USD $49.99/year
+    licenseDurationDays: 365,
+    trialDays: 14,
+    maxMachines: 2,
+    features: [
+      'linux-x64',
+      'linux-arm64',
+      'standalone-mode',
+      'local-tds-engine',
+      'guardian-full',
+      'hal-attestation',
+      'all-response-levels',
+      'cloud_llm',            // Professional gets cloud LLM
+      'local-llm-support',
+      'systemd-service',      // Can run as systemd service
+      'offline-mode',
+      'email-support',
+      '30-day-retention',
+    ],
+    s3PackageKey: 'silo/linux/silo-professional-linux.zip',
+    version: '1.3.0',
+  },
+
+  // ============================================
+  // SILO Business - $499.99/year, 5 machines, NO trial
+  // Includes Cortex but EXCLUDES enterprise features
+  // ============================================
   {
     name: 'SILO Business',
-    description: 'SILO for small teams and businesses. Includes advanced modules and priority support.',
+    description: 'SILO for small teams. Includes Cortex central management for up to 5 machines. No cloud LLM, Docker, K8s, or VMware integration.',
     category: 'silo',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'HYBRID',
-    priceMonthly: 19900,      // SGD 199.00/month
-    priceAnnual: 199000,      // SGD 1990.00/year (save ~17%)
-    licenseDurationDays: null,
-    features: ['windows-x64', 'macos-arm64', 'linux-x64', 'all-modules', 'advanced-reporting', 'api-access', 'priority-support', '5-machines', 'team-dashboard'],
+    priceMonthly: null,
+    priceAnnual: 49999,       // USD $499.99/year
+    licenseDurationDays: 365,
+    trialDays: null,          // No trial for Business
+    maxMachines: 5,
+    features: [
+      // Platform support
+      'all-platforms',
+      'windows-x64',
+      'windows-arm64',
+      'macos-x64',
+      'macos-arm64',
+      'linux-x64',
+      'linux-arm64',
+
+      // Core Cortex features
+      'cortex',
+      'sidecar-management',
+      'eventbus',
+      'central-dashboard',
+      'real-time-monitoring',
+      'tds-engine',
+      'correlation-engine',
+      'all-response-levels',
+      'guardian-full',
+      'hal-attestation',
+
+      // AI - LOCAL ONLY (no cloud providers)
+      'local-llm-only',       // Ollama/LMStudio only
+      // BLOCKED: cloud_llm (OpenAI, Anthropic, Gemini)
+      // BLOCKED: ai_brain (autonomous mode)
+
+      // Container/Orchestration - NONE
+      // BLOCKED: docker_agent
+      // BLOCKED: k8inspector
+
+      // Virtualization - NONE
+      // BLOCKED: vmware_phantom_visor
+
+      // Federation - NONE
+      // BLOCKED: child_cortex (multi-cortex federation)
+      // BLOCKED: multi_tenant
+
+      // Auth - BASIC ONLY
+      'local-auth',
+      // BLOCKED: sso (SAML/OIDC)
+
+      // Integrations - NONE
+      // BLOCKED: siem_integration (Splunk, Elastic, Sentinel)
+      // BLOCKED: webhook_soar (external workflow triggers)
+      // BLOCKED: gtn_access (Global Threat Network)
+      // BLOCKED: custom_detection_rules (user-defined TDS patterns)
+
+      // Support & Reporting
+      '90-day-retention',
+      'priority-support',
+      'basic-reporting',
+      // BLOCKED: extended_audit_log
+      // BLOCKED: compliance_reports
+      // BLOCKED: white_label
+    ],
     s3PackageKey: 'silo/business/silo-business-multiplatform.zip',
-    version: '1.0.0',
+    version: '1.3.0',
   },
-  // Enterprise Edition - Subscription
+
+  // ============================================
+  // SILO Enterprise - $899.99/year, 20 machines, NO trial
+  // ALL features included
+  // ============================================
   {
     name: 'SILO Enterprise',
-    description: 'Full SILO suite for organizations. Includes all features, SSO, and dedicated support.',
-    category: 'silo',
-    purchaseType: 'SUBSCRIPTION',
-    pricingType: 'FIXED',
-    validationMode: 'HYBRID',
-    priceMonthly: 49900,      // SGD 499.00/month
-    priceAnnual: 499000,      // SGD 4990.00/year (save ~17%)
-    licenseDurationDays: null,
-    features: ['all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support', 'unlimited-machines', 'custom-integrations', 'sla'],
-    s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
-    version: '1.0.0',
-  },
-  // Enterprise License Packs - Annual bundles (Server $5,000 + $45/license/year)
-  {
-    name: 'SILO Enterprise Pack - 5 Licenses',
-    description: 'Enterprise license bundle for 5 users. Includes server license and 5 seat licenses.',
+    description: 'Full SILO suite for organizations. All features including cloud LLM, Docker, K8s, VMware, federation, SSO, SIEM, and GTN.',
     category: 'silo',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
     validationMode: 'HYBRID',
     priceMonthly: null,
-    priceAnnual: 522500,      // SGD 5,225/year ($5,000 server + 5 × $45 licenses)
-    licenseDurationDays: null,
-    features: ['5-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'priority-support'],
+    priceAnnual: 89999,       // USD $899.99/year
+    licenseDurationDays: 365,
+    trialDays: null,          // No trial for Enterprise
+    maxMachines: 20,
+    features: [
+      // Platform support
+      'all-platforms',
+      'windows-x64',
+      'windows-arm64',
+      'macos-x64',
+      'macos-arm64',
+      'linux-x64',
+      'linux-arm64',
+
+      // Core Cortex features
+      'cortex',
+      'sidecar-management',
+      'eventbus',
+      'central-dashboard',
+      'real-time-monitoring',
+      'tds-engine',
+      'correlation-engine',
+      'all-response-levels',
+      'guardian-full',
+      'hal-attestation',
+
+      // AI - ALL providers
+      'cloud_llm',            // OpenAI, Anthropic, Gemini
+      'ai_brain',             // Autonomous AI SecOps mode
+      'local-llm-support',    // Ollama/LMStudio
+
+      // Container/Orchestration - ALL
+      'docker_agent',         // Docker container monitoring
+      'k8inspector',          // Kubernetes inspection
+
+      // Virtualization - ALL
+      'vmware_phantom_visor', // VMware Fusion/Workstation L1 integration
+
+      // Federation - ALL
+      'child_cortex',         // Multi-Cortex federation
+      'multi_tenant',         // Multi-tenant support
+
+      // Auth - ALL
+      'local-auth',
+      'sso',                  // SAML/OIDC SSO
+
+      // Integrations - ALL
+      'siem_integration',     // Splunk, Elastic, Sentinel
+      'webhook_soar',         // External workflow triggers
+      'gtn_access',           // Global Threat Network IOC sharing
+      'custom_detection_rules', // User-defined TDS patterns
+
+      // Support & Reporting - ALL
+      '365-day-retention',
+      'extended_audit_log',   // Extended audit logging
+      'compliance_reports',   // SOC2, ISO27001 reports
+      'dedicated-support',
+      'sla',
+    ],
     s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
-    version: '1.0.0',
+    version: '1.3.0',
   },
+
+  // ============================================
+  // License Packs - Add-on machine bundles
+  // Require Business or Enterprise base license
+  // ============================================
   {
-    name: 'SILO Enterprise Pack - 10 Licenses',
-    description: 'Enterprise license bundle for 10 users. Includes server license and 10 seat licenses.',
-    category: 'silo',
+    name: 'SILO License Pack - 5 Machines',
+    description: 'Add 5 additional machines to your SILO Business or Enterprise license.',
+    category: 'silo-addons',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
-    validationMode: 'HYBRID',
+    validationMode: 'ONLINE',
     priceMonthly: null,
-    priceAnnual: 545000,      // SGD 5,450/year ($5,000 server + 10 × $45 licenses)
-    licenseDurationDays: null,
-    features: ['10-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support'],
-    s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
-    version: '1.0.0',
+    priceAnnual: 9900,        // USD $99/year
+    licenseDurationDays: 365,
+    trialDays: null,
+    maxMachines: 5,           // +5 machines
+    features: ['license-pack', 'addon', 'requires-business-or-enterprise'],
+    s3PackageKey: null,
+    version: '1.3.0',
   },
   {
-    name: 'SILO Enterprise Pack - 20 Licenses',
-    description: 'Enterprise license bundle for 20 users. Includes server license and 20 seat licenses.',
-    category: 'silo',
+    name: 'SILO License Pack - 10 Machines',
+    description: 'Add 10 additional machines to your SILO Business or Enterprise license.',
+    category: 'silo-addons',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
-    validationMode: 'HYBRID',
+    validationMode: 'ONLINE',
     priceMonthly: null,
-    priceAnnual: 590000,      // SGD 5,900/year ($5,000 server + 20 × $45 licenses)
-    licenseDurationDays: null,
-    features: ['20-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support', 'custom-integrations'],
-    s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
-    version: '1.0.0',
+    priceAnnual: 17900,       // USD $179/year
+    licenseDurationDays: 365,
+    trialDays: null,
+    maxMachines: 10,          // +10 machines
+    features: ['license-pack', 'addon', 'requires-business-or-enterprise'],
+    s3PackageKey: null,
+    version: '1.3.0',
   },
   {
-    name: 'SILO Enterprise Pack - 50 Licenses',
-    description: 'Enterprise license bundle for 50 users. Includes server license and 50 seat licenses.',
-    category: 'silo',
+    name: 'SILO License Pack - 20 Machines',
+    description: 'Add 20 additional machines to your SILO Business or Enterprise license.',
+    category: 'silo-addons',
     purchaseType: 'SUBSCRIPTION',
     pricingType: 'FIXED',
-    validationMode: 'HYBRID',
+    validationMode: 'ONLINE',
     priceMonthly: null,
-    priceAnnual: 725000,      // SGD 7,250/year ($5,000 server + 50 × $45 licenses)
-    licenseDurationDays: null,
-    features: ['50-licenses', 'all-platforms', 'all-modules', 'advanced-reporting', 'api-access', 'sso', 'audit-logs', 'dedicated-support', 'custom-integrations', 'sla'],
-    s3PackageKey: 'silo/enterprise/silo-enterprise-multiplatform.zip',
-    version: '1.0.0',
+    priceAnnual: 35000,       // USD $350/year
+    licenseDurationDays: 365,
+    trialDays: null,
+    maxMachines: 20,          // +20 machines
+    features: ['license-pack', 'addon', 'requires-business-or-enterprise'],
+    s3PackageKey: null,
+    version: '1.3.0',
   },
+
+  // ============================================
   // Enterprise Custom - Contact sales (POA)
+  // ============================================
   {
     name: 'SILO Enterprise Custom',
-    description: 'Custom SILO deployment for large organizations. Unlimited licenses, on-premise options. Contact sales for pricing.',
+    description: 'Custom SILO deployment for large organizations. Unlimited licenses, on-premise, air-gapped options. Contact sales.',
     category: 'silo',
     purchaseType: 'ONE_TIME',
     pricingType: 'FIXED',
     validationMode: 'OFFLINE',
-    priceMonthly: null,       // POA
+    priceMonthly: null,       // POA - contact sales
     priceAnnual: null,
     licenseDurationDays: 365,
-    features: ['unlimited-licenses', 'all-features', 'on-premise', 'air-gapped', 'custom-modules', 'white-label', 'source-code-review', 'dedicated-account-manager', 'premium-sla'],
+    trialDays: null,
+    maxMachines: 9999,        // Unlimited
+    features: [
+      'all-features',
+      'unlimited-machines',
+      'on-premise',
+      'air-gapped',
+      'white_label',
+      'source-code-review',
+      'dedicated-account-manager',
+      'premium-sla',
+      'custom-integrations',
+    ],
     s3PackageKey: null,
     version: null,
-  },
-  // Add-on: SILO k8inspector Integration (Annual only)
-  {
-    name: 'SILO k8inspector Integration',
-    description: 'Add Kubernetes inspection capabilities to SILO. Requires SILO Business or Enterprise license.',
-    category: 'silo-addons',
-    purchaseType: 'SUBSCRIPTION',
-    pricingType: 'FIXED',
-    validationMode: 'ONLINE',
-    priceMonthly: null,
-    priceAnnual: 49000,       // SGD 490.00/year
-    licenseDurationDays: null,
-    features: ['k8s-cluster-inspection', 'pod-analysis', 'network-policy-audit', 'rbac-review', 'secrets-scanning', 'compliance-checks', 'silo-integration'],
-    s3PackageKey: 'silo/addons/silo-k8inspector-addon.zip',
-    version: '1.0.0',
-  },
-  // Add-on: SILO Docker Monitor (Annual only)
-  {
-    name: 'SILO Docker Monitor',
-    description: 'Real-time Docker container monitoring and security analysis for SILO. Requires SILO Business or Enterprise license.',
-    category: 'silo-addons',
-    purchaseType: 'SUBSCRIPTION',
-    pricingType: 'FIXED',
-    validationMode: 'ONLINE',
-    priceMonthly: null,
-    priceAnnual: 29000,       // SGD 290.00/year
-    licenseDurationDays: null,
-    features: ['container-monitoring', 'image-scanning', 'runtime-security', 'network-analysis', 'log-aggregation', 'alerting', 'silo-integration'],
-    s3PackageKey: 'silo/addons/silo-docker-monitor-addon.zip',
-    version: '1.0.0',
   },
 ];
 
 async function seed() {
   console.log('Seeding SILO products...');
+  console.log('');
+  console.log('Pricing Structure:');
+  console.log('  - Home:         $29.99/year, 1 machine, 7-day trial');
+  console.log('  - Professional: $49.99/year, 2 machines, 14-day trial');
+  console.log('  - Business:     $499.99/year, 5 machines, no trial (Cortex, no enterprise features)');
+  console.log('  - Enterprise:   $899.99/year, 20 machines, no trial (all features)');
+  console.log('  - Pack 5:       $99/year (+5 machines)');
+  console.log('  - Pack 10:      $179/year (+10 machines)');
+  console.log('  - Pack 20:      $350/year (+20 machines)');
+  console.log('');
 
   for (const product of siloProducts) {
     // Check if product already exists by name and category
@@ -234,7 +500,25 @@ async function seed() {
     }
   }
 
+  console.log('');
   console.log('Done seeding SILO products.');
+  console.log('');
+  console.log('Enterprise features (blocked in Business tier):');
+  console.log('  - cloud_llm: Cloud LLM providers (OpenAI, Anthropic, Gemini)');
+  console.log('  - ai_brain: Autonomous AI SecOps mode');
+  console.log('  - docker_agent: Docker container monitoring');
+  console.log('  - k8inspector: Kubernetes inspection');
+  console.log('  - vmware_phantom_visor: VMware L1 Phantom Visor');
+  console.log('  - child_cortex: Multi-Cortex federation');
+  console.log('  - multi_tenant: Multi-tenant support');
+  console.log('  - sso: SAML/OIDC SSO');
+  console.log('  - siem_integration: Splunk, Elastic, Sentinel');
+  console.log('  - webhook_soar: External workflow triggers');
+  console.log('  - gtn_access: Global Threat Network');
+  console.log('  - custom_detection_rules: User-defined TDS patterns');
+  console.log('  - extended_audit_log: Extended audit logging');
+  console.log('  - compliance_reports: SOC2/ISO27001 reports');
+  console.log('  - white_label: White-label branding');
 }
 
 seed()
