@@ -1,6 +1,7 @@
 var API_URL = '';
-var token = localStorage.getItem('adminToken'); // Backward compat
-var adminUser = JSON.parse(localStorage.getItem('adminUser') || 'null');
+// Unified token storage shared with /index.html (the single login entry point).
+var token = localStorage.getItem('lsAccessToken');
+var adminUser = JSON.parse(localStorage.getItem('lsUser') || 'null');
 
 // Data cache
 var products = [];
@@ -17,36 +18,24 @@ document.addEventListener('DOMContentLoaded', function() {
   checkAuthStatus();
 });
 
-// Check authentication status
+// Check authentication status. /admin.html is dashboard-only; the single
+// login entry point is /. If we don't have an access token + admin claim,
+// bounce the user there.
 function checkAuthStatus() {
-  api('/api/portal/me')
-    .then(function(data) {
-      if (data.isAdmin) {
-        adminUser = data;
-        localStorage.setItem('adminUser', JSON.stringify(adminUser));
-        showAdminInterface();
-        loadDashboard();
-      } else {
-        showSection('login');
-        showAlert('loginAlert', 'Admin access required', 'error');
-      }
-    })
-    .catch(function() {
-      // Not authenticated
-      if (token && adminUser) {
-        // Try with stored token
-        showAdminInterface();
-        loadDashboard();
-      } else {
-        showSection('login');
-      }
-    });
+  if (token && adminUser && adminUser.isAdmin && adminUser.pool === 'staff') {
+    showAdminInterface();
+    loadDashboard();
+    return;
+  }
+  showSection('login');
+  // Tiny delay so the user briefly sees the redirect message.
+  setTimeout(function () {
+    window.location.href = '/';
+  }, 250);
 }
 
 // Bind Events
 function bindEvents() {
-  // Login form
-  document.getElementById('loginForm').addEventListener('submit', handleLogin);
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
   // Sidebar navigation
@@ -84,6 +73,23 @@ function bindEvents() {
   document.getElementById('closeLicenseModal').addEventListener('click', closeLicenseModal);
   document.getElementById('cancelLicenseBtn').addEventListener('click', closeLicenseModal);
   document.getElementById('licenseForm').addEventListener('submit', handleLicenseSubmit);
+
+  // Test license modal (no-Stripe issuance)
+  document.getElementById('testLicenseBtn').addEventListener('click', openTestLicenseModal);
+  document.getElementById('closeTestLicenseModal').addEventListener('click', closeTestLicenseModal);
+  document.getElementById('cancelTestLicenseBtn').addEventListener('click', closeTestLicenseModal);
+  document.getElementById('testLicenseForm').addEventListener('submit', handleTestLicenseSubmit);
+  document.getElementById('testLicenseModal').addEventListener('click', function (e) {
+    if (e.target === this) closeTestLicenseModal();
+  });
+
+  // License result modal (shows the issued key with a copy button)
+  document.getElementById('closeLicenseResultModal').addEventListener('click', closeLicenseResultModal);
+  document.getElementById('closeLicenseResultBtn').addEventListener('click', closeLicenseResultModal);
+  document.getElementById('copyLicenseKeyBtn').addEventListener('click', copyLicenseKey);
+  document.getElementById('licenseResultModal').addEventListener('click', function (e) {
+    if (e.target === this) closeLicenseResultModal();
+  });
 
   // Close modals on outside click
   document.getElementById('productModal').addEventListener('click', function(e) {
@@ -220,11 +226,20 @@ function api(endpoint, options) {
     method: options.method || 'GET',
     headers: headers,
     body: options.body,
-    credentials: 'include' // Send cookies with requests
+    credentials: 'include'
   })
   .then(function(response) {
     return response.json().then(function(data) {
       if (!response.ok) {
+        // Bounce back to / on auth failure — admin tokens expire ~1h.
+        if ((response.status === 401 || response.status === 403) && token) {
+          token = null;
+          adminUser = null;
+          localStorage.removeItem('lsAccessToken');
+          localStorage.removeItem('lsRefreshToken');
+          localStorage.removeItem('lsUser');
+          window.location.href = '/';
+        }
         throw new Error(data.error || 'Request failed');
       }
       return data;
@@ -253,51 +268,18 @@ function showAdminInterface() {
   if (firstLink) firstLink.classList.add('active');
 }
 
-// Handle Login
-function handleLogin(e) {
-  e.preventDefault();
-  var alertEl = document.getElementById('loginAlert');
-  var email = document.getElementById('loginEmail').value;
-  var password = document.getElementById('loginPassword').value;
-
-  api('/api/portal/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email: email, password: password })
-  })
-  .then(function(data) {
-    if (!data.customer.isAdmin) {
-      alertEl.innerHTML = '<div class="alert alert-error">Access denied. Admin privileges required.</div>';
-      return;
-    }
-
-    token = data.token;
-    adminUser = data.customer;
-    localStorage.setItem('adminToken', token);
-    localStorage.setItem('adminUser', JSON.stringify(adminUser));
-
-    showAdminInterface();
-    loadDashboard();
-  })
-  .catch(function(error) {
-    alertEl.innerHTML = '<div class="alert alert-error">' + escapeHtml(error.message) + '</div>';
-  });
-}
-
-// Logout
+// Logout — clears unified token storage and bounces back to /.
 function logout() {
-  // Call server logout to invalidate token and clear cookie
-  api('/api/portal/auth/logout', { method: 'POST' })
-    .catch(function() {
-      // Ignore errors, still clear local state
-    })
-    .finally(function() {
+  api('/api/auth/logout', { method: 'POST' })
+    .catch(function () { /* ignore — still clear local state */ })
+    .finally(function () {
       token = null;
       adminUser = null;
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('adminUser');
-      document.querySelector('.sidebar').style.display = 'none';
-      document.getElementById('adminNav').classList.add('hidden');
-      showSection('login');
+      localStorage.removeItem('lsAccessToken');
+      localStorage.removeItem('lsRefreshToken');
+      localStorage.removeItem('lsUser');
+      if (window.LicenseServerIdleTimer) window.LicenseServerIdleTimer.onLogout();
+      window.location.href = '/';
     });
 }
 
@@ -743,20 +725,117 @@ function handleLicenseSubmit(e) {
     maxActivations: parseInt(document.getElementById('licenseMaxActivations').value) || 1
   };
 
+  var seats = parseInt(document.getElementById('licenseSeatCount').value);
+  if (seats > 0) data.seatCount = seats;
+
+  var componentsRaw = (document.getElementById('licenseEnabledComponents').value || '').trim();
+  if (componentsRaw) {
+    data.enabledComponents = componentsRaw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
   var expiry = document.getElementById('licenseExpiry').value;
   if (expiry) {
     data.expiresAt = new Date(expiry).toISOString();
   }
 
   api('/api/admin/licenses', { method: 'POST', body: JSON.stringify(data) })
-    .then(function(license) {
+    .then(function (license) {
       closeLicenseModal();
       loadLicenses();
-      alert('License created: ' + license.key);
+      showLicenseResult(license, null, null);
     })
-    .catch(function(error) {
+    .catch(function (error) {
       alert('Failed to create license: ' + error.message);
     });
+}
+
+// --- Test license (no-Stripe) ---
+function openTestLicenseModal() {
+  document.getElementById('testLicenseModal').classList.add('active');
+  document.getElementById('testLicenseForm').reset();
+  var sel = document.getElementById('testLicenseProduct');
+  sel.innerHTML = '<option value="">Select a product...</option>';
+  for (var i = 0; i < products.length; i++) {
+    var p = products[i];
+    var label = p.name +
+      (p.priceAnnual ? '  ($' + (p.priceAnnual / 100).toFixed(2) + '/yr)' : '') +
+      '  [' + (p.platforms || []).join(',') + ']';
+    sel.innerHTML += '<option value="' + p.id + '">' + escapeHtml(label) + '</option>';
+  }
+}
+
+function closeTestLicenseModal() {
+  document.getElementById('testLicenseModal').classList.remove('active');
+}
+
+function handleTestLicenseSubmit(e) {
+  e.preventDefault();
+  var body = {
+    productId: document.getElementById('testLicenseProduct').value
+  };
+  var seats = parseInt(document.getElementById('testLicenseSeatCount').value);
+  if (seats > 0) body.seatCount = seats;
+  var days = parseInt(document.getElementById('testLicenseExpiresInDays').value);
+  if (days > 0) body.expiresInDays = days;
+  var email = document.getElementById('testLicenseCustomerEmail').value.trim();
+  if (email) body.customerEmail = email;
+  var note = document.getElementById('testLicenseNote').value.trim();
+  if (note) body.note = note;
+  var componentsRaw = (document.getElementById('testLicenseEnabledComponents').value || '').trim();
+  if (componentsRaw) {
+    body.enabledComponents = componentsRaw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
+  api('/api/admin/licenses/test', { method: 'POST', body: JSON.stringify(body) })
+    .then(function (resp) {
+      closeTestLicenseModal();
+      loadLicenses();
+      showLicenseResult(resp.license, resp.product, resp.customer);
+    })
+    .catch(function (error) {
+      alert('Failed to issue test license: ' + error.message);
+    });
+}
+
+// --- Result modal (copyable key) ---
+function showLicenseResult(license, product, customer) {
+  document.getElementById('licenseResultKey').value = license.key;
+  var bits = [];
+  if (product) bits.push(product.name);
+  if (customer) bits.push('issued to ' + customer.email);
+  bits.push('seats=' + (license.seatCount || 1));
+  bits.push('maxActivations=' + (license.maxActivations || 1));
+  var comps = (license.enabledComponents && license.enabledComponents.length) ? license.enabledComponents : null;
+  if (comps) bits.push('components=[' + comps.join(',') + ']');
+  else bits.push('components=(inherits from product)');
+  if (license.expiresAt) bits.push('expires ' + new Date(license.expiresAt).toISOString().split('T')[0]);
+  document.getElementById('licenseResultMeta').textContent = bits.join('  ·  ');
+  document.getElementById('licenseResultModal').classList.add('active');
+}
+
+function closeLicenseResultModal() {
+  document.getElementById('licenseResultModal').classList.remove('active');
+}
+
+function copyLicenseKey() {
+  var input = document.getElementById('licenseResultKey');
+  input.select();
+  input.setSelectionRange(0, 99999);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).then(function () {
+      flashCopyOk();
+    });
+  } else {
+    document.execCommand('copy');
+    flashCopyOk();
+  }
+}
+
+function flashCopyOk() {
+  var btn = document.getElementById('copyLicenseKeyBtn');
+  var prev = btn.textContent;
+  btn.textContent = 'Copied!';
+  setTimeout(function () { btn.textContent = prev; }, 1200);
 }
 
 // License Actions

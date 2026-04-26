@@ -12,14 +12,20 @@ import { initializeAuthProvider } from './auth/index.js';
 import { initializeConfigProvider } from './config/providers/index.js';
 import { initializeEmailService } from './services/email.service.js';
 import { initializeRedis, closeRedis, isRedisAvailable } from './config/redis.js';
+import { ensureCA, isMtlsCaEnabled } from './services/ca.service.js';
 import { logger, generateRequestId } from './services/logger.service.js';
 import { requestTimeout, responseHeaders } from './middleware/timeout.js';
+import { authenticate } from './auth/index.js';
+import { idleTimeout as idleTimeoutMiddleware } from './middleware/idleTimeout.js';
 
 import adminRoutes from './routes/admin.js';
 import portalRoutes from './routes/portal.js';
 import validationRoutes from './routes/validation.js';
 import webhookRoutes from './routes/webhooks.js';
 import desktopRoutes from './routes/desktop.js';
+import customerAuthRoutes from './routes/customerAuth.js';
+import adminAuthRoutes from './routes/adminAuth.js';
+import authRoutes from './routes/auth.js';
 
 const app = express();
 
@@ -65,8 +71,11 @@ app.use('/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: config.REQUEST_BODY_LIMIT }));
 
 // Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/portal', portalRoutes);
+app.use('/api/customer/auth', customerAuthRoutes);
 app.use('/api/v1', validationRoutes);
 app.use('/api/v1/desktop', desktopRoutes);
 app.use('/webhooks', webhookRoutes);
@@ -77,14 +86,34 @@ const __dirname = path.dirname(__filename);
 const publicPath = path.join(__dirname, '../public');
 app.use(express.static(publicPath));
 
+// Idle-timeout configuration for the frontend timer. Public so the login
+// pages can read it before authenticating.
+app.get('/api/auth/idle-config', (_req, res) => {
+  const timeoutMs = parseInt(config.SESSION_IDLE_TIMEOUT_MS, 10);
+  let warnMs = parseInt(config.SESSION_IDLE_WARN_MS, 10);
+  if (!Number.isFinite(warnMs) || warnMs <= 0 || warnMs >= timeoutMs) {
+    warnMs = Math.max(timeoutMs - 60_000, Math.floor(timeoutMs * 0.9));
+  }
+  res.json({ timeoutMs, warnMs });
+});
+
+// Authenticated heartbeat: the frontend "Stay signed in" button hits this
+// to refresh the server-side idle entry without doing any real work.
+app.get('/api/auth/heartbeat', authenticate, idleTimeoutMiddleware, (_req, res) => {
+  res.json({ ok: true, timestamp: new Date().toISOString() });
+});
+
 // API info endpoint
 app.get('/api', (_req, res) => {
   res.json({
     name: 'License Server API',
     version: '1.0.0',
     endpoints: {
+      auth: '/api/auth',
       admin: '/api/admin',
       portal: '/api/portal',
+      customerAuth: '/api/customer/auth',
+      adminAuth: '/api/admin/auth',
       validation: '/api/v1',
       desktop: '/api/v1/desktop',
       webhooks: '/webhooks/stripe',
@@ -208,6 +237,20 @@ async function start() {
 
     await connectDatabase();
     await ensureAdminExists();
+
+    // mTLS agent CA — opt-in (MTLS_AGENT_CA_ENABLED). Customers who run
+    // their own Cortex turn this on to allow sidecars to enroll for client
+    // certificates. Idempotent: only generates a CA if one is not already
+    // present in MTLS_CA_SECRET_NAME.
+    if (isMtlsCaEnabled()) {
+      try {
+        await ensureCA();
+      } catch (err) {
+        logger.error('Failed to bootstrap mTLS agent CA', err);
+        // Non-fatal: license-server stays up; agents/enroll will return 503
+        // until the secret is reachable / IAM is granted.
+      }
+    }
 
     const port = parseInt(config.PORT, 10);
     app.listen(port, () => {

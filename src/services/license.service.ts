@@ -11,6 +11,10 @@ export interface CreateLicenseInput {
   productId: string;
   expiresAt?: Date;
   maxActivations?: number;
+  /** Total seats for team/enterprise licences. Defaults to product.defaultSeatCount when omitted. */
+  seatCount?: number;
+  /** Per-license component override. Empty/omitted means inherit from product.components. */
+  enabledComponents?: string[];
   metadata?: Prisma.InputJsonValue;
 }
 
@@ -30,6 +34,18 @@ export interface LicenseWithRelations extends License {
 export async function createLicense(input: CreateLicenseInput): Promise<License> {
   const key = generateLicenseKey();
 
+  // If the caller didn't specify seat count, pull the product's default so
+  // team/enterprise SKUs (e.g. Cortex Business=5, Enterprise=10) issue with
+  // their advertised capacity.
+  let seatCount = input.seatCount;
+  if (seatCount === undefined) {
+    const product = await prisma.product.findUnique({
+      where: { id: input.productId },
+      select: { defaultSeatCount: true },
+    });
+    seatCount = product?.defaultSeatCount ?? 1;
+  }
+
   return prisma.license.create({
     data: {
       key,
@@ -37,6 +53,8 @@ export async function createLicense(input: CreateLicenseInput): Promise<License>
       productId: input.productId,
       expiresAt: input.expiresAt,
       maxActivations: input.maxActivations || 1,
+      seatCount,
+      enabledComponents: input.enabledComponents ?? [],
       metadata: input.metadata,
     },
   });
@@ -116,11 +134,35 @@ export async function reactivateLicense(id: string): Promise<License> {
   });
 }
 
+/**
+ * Resolve the effective component list for a license: the per-license
+ * `enabledComponents` override if non-empty, otherwise the product's
+ * `components`. This is the source of truth for "what is this license
+ * authorised to deploy".
+ */
+export function effectiveComponentsFor(license: {
+  enabledComponents: string[];
+  product: { components: string[] };
+}): string[] {
+  if (Array.isArray(license.enabledComponents) && license.enabledComponents.length > 0) {
+    return license.enabledComponents;
+  }
+  return license.product.components || [];
+}
+
 export async function validateLicense(
   licenseKey: string,
-  machineFingerprint?: string
+  machineFingerprint?: string,
+  component?: string,
 ): Promise<LicenseValidationResponse> {
-  const license = await getLicenseByKey(licenseKey);
+  const license = await prisma.license.findUnique({
+    where: { key: licenseKey },
+    include: {
+      customer: { select: { id: true, email: true, name: true } },
+      product: { select: { id: true, name: true, features: true, components: true } },
+      activations: true,
+    },
+  });
 
   if (!license) {
     return { valid: false, error: 'Invalid license key' };
@@ -140,7 +182,7 @@ export async function validateLicense(
 
   if (machineFingerprint) {
     const activation = license.activations.find(
-      (a) => a.machineFingerprint === machineFingerprint
+      (a) => a.machineFingerprint === machineFingerprint,
     );
 
     if (!activation) {
@@ -148,6 +190,16 @@ export async function validateLicense(
         return { valid: false, error: 'Maximum activations reached' };
       }
     }
+  }
+
+  const components = effectiveComponentsFor(license);
+
+  if (component && !components.includes(component)) {
+    return {
+      valid: false,
+      error: `Component '${component}' is not enabled for this license`,
+      components,
+    };
   }
 
   await prisma.license.update({
@@ -160,6 +212,7 @@ export async function validateLicense(
     product: license.product.name,
     expiresAt: license.expiresAt?.toISOString(),
     features: license.product.features,
+    components,
   };
 }
 

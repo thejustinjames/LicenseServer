@@ -97,6 +97,14 @@ model Product {
   parentProduct        Product?       @relation("ProductAddons", fields: [parentProductId], references: [id])
   addons               Product[]      @relation("ProductAddons")
 
+  // SILO can deploy individual services (cortex, dist, dashboard, ml, etc.).
+  // `components` is the maximum set this SKU is permitted to enable. A
+  // license inherits these by default; a per-license `enabledComponents`
+  // narrows the set (e.g. an Enterprise SKU sold without ML for one
+  // customer). Free-form string[] so adding a new component doesn't
+  // require a schema migration.
+  components           String[]       @default([])
+
   licenses License[]
   quotes   Quote[]
 
@@ -114,6 +122,11 @@ model Customer {
   isAdmin             Boolean   @default(false) @map("is_admin")
   failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
   lockedUntil         DateTime? @map("locked_until")
+  // Cognito linkage for customers using the external user pool. Nullable so
+  // legacy local-password customers continue to work until migrated.
+  cognitoSub          String?   @unique @map("cognito_sub")
+  cognitoPool         String?   @map("cognito_pool")
+  mfaEnabledAt        DateTime? @map("mfa_enabled_at")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
@@ -152,6 +165,12 @@ model License {
   // License terms
   licenseTerm        LicenseTerm   @default(SUBSCRIPTION) @map("license_term")
   renewalDate        DateTime?     @map("renewal_date")
+
+  // Per-license override of the product's `components` list. Empty/null
+  // means "inherit the product's full component set". Use this to sell an
+  // Enterprise SKU but disable ML for a specific customer, or to issue a
+  // narrowly-scoped test license that only enables `cortex` + `dashboard`.
+  enabledComponents  String[]      @default([]) @map("enabled_components")
 
   // Parent license for seat assignments (organization master license)
   parentLicenseId    String?       @map("parent_license_id")
@@ -247,6 +266,31 @@ model SeatAssignment {
   @@index([email])
   @@index([inviteToken])
   @@map("seat_assignments")
+}
+
+// mTLS agent client certificate issuance ledger
+// (one row per cert issued by /api/v1/agents/enroll)
+model AgentCertificate {
+  id                 String    @id @default(uuid())
+  licenseId          String    @map("license_id")
+  machineFingerprint String    @map("machine_fingerprint")
+
+  serial             String    @unique
+  subject            String
+  fingerprintSha256  String    @map("fingerprint_sha256")
+  notBefore          DateTime  @map("not_before")
+  notAfter           DateTime  @map("not_after")
+
+  issuedAt           DateTime  @default(now()) @map("issued_at")
+  revokedAt          DateTime? @map("revoked_at")
+  revokedReason      String?   @map("revoked_reason")
+
+  // Loose join: do not cascade — keep ledger after license deletion for audit.
+  @@index([licenseId])
+  @@index([machineFingerprint])
+  @@index([revokedAt])
+  @@index([notAfter])
+  @@map("agent_certificates")
 }
 
 // Usage-based billing records

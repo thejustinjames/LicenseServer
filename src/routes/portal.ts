@@ -2,6 +2,8 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { authenticate, getAuthProvider } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rateLimit.js';
+import { idleTimeout, seedSession } from '../middleware/idleTimeout.js';
+import { clearSession } from '../config/redis.js';
 import { validateIdParam, validateUUIDParam, parsePositiveInt } from '../middleware/validation.js';
 import * as customerService from '../services/customer.service.js';
 import * as licenseService from '../services/license.service.js';
@@ -125,6 +127,7 @@ router.post('/auth/register', authRateLimit, async (req, res: Response) => {
       const refreshToken = authProvider.generateRefreshToken(auth.customer);
       authProvider.setRefreshCookie(res, refreshToken.token);
     }
+    await seedSession(auth.token);
 
     logger.audit('register', {
       customerId: auth.customer.id,
@@ -191,6 +194,7 @@ router.post('/auth/login', authRateLimit, async (req, res: Response) => {
       const refreshToken = authProvider.generateRefreshToken(auth.customer);
       authProvider.setRefreshCookie(res, refreshToken.token);
     }
+    await seedSession(auth.token);
 
     logger.audit('login', {
       customerId: auth.customer.id,
@@ -212,11 +216,14 @@ router.post('/auth/login', authRateLimit, async (req, res: Response) => {
 });
 
 // Logout route
-router.post('/auth/logout', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/auth/logout', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const authProvider = getAuthProvider();
     if (authProvider instanceof JWTAuthProvider) {
       await authProvider.logout(req, res);
+    }
+    if (req.tokenPayload?.jti) {
+      await clearSession(req.tokenPayload.jti);
     }
 
     res.json({ success: true, message: 'Logged out successfully' });
@@ -248,6 +255,7 @@ router.post('/auth/refresh', authRateLimit, async (req, res: Response) => {
       res.status(401).json({ error: result.error || 'Token refresh failed', code: 'AUTH_003' });
       return;
     }
+    await seedSession(result.accessToken);
 
     res.json({
       success: true,
@@ -349,7 +357,7 @@ router.post('/auth/reset-password', authRateLimit, async (req, res: Response) =>
 });
 
 // Protected routes (authentication required)
-router.get('/me', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/me', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -369,7 +377,7 @@ router.get('/me', authenticate, async (req: AuthenticatedRequest, res: Response)
   }
 });
 
-router.put('/me', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/me', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -394,7 +402,7 @@ router.put('/me', authenticate, async (req: AuthenticatedRequest, res: Response)
   }
 });
 
-router.get('/licenses', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/licenses', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -409,7 +417,7 @@ router.get('/licenses', authenticate, async (req: AuthenticatedRequest, res: Res
   }
 });
 
-router.get('/downloads/:productId', authenticate, validateUUIDParam('productId'), async (req: AuthenticatedRequest, res: Response) => {
+router.get('/downloads/:productId', authenticate, idleTimeout, validateUUIDParam('productId'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -471,7 +479,7 @@ router.get('/billing/validate-promo/:code', async (req, res: Response) => {
   }
 });
 
-router.post('/billing/checkout', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/billing/checkout', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -517,7 +525,7 @@ router.post('/billing/checkout', authenticate, async (req: AuthenticatedRequest,
   }
 });
 
-router.post('/billing/portal', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/billing/portal', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -536,7 +544,7 @@ router.post('/billing/portal', authenticate, async (req: AuthenticatedRequest, r
   }
 });
 
-router.get('/subscriptions', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/subscriptions', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -552,7 +560,7 @@ router.get('/subscriptions', authenticate, async (req: AuthenticatedRequest, res
 });
 
 // Cancel subscription at period end
-router.post('/subscriptions/:id/cancel', authenticate, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/subscriptions/:id/cancel', authenticate, idleTimeout, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -572,7 +580,7 @@ router.post('/subscriptions/:id/cancel', authenticate, validateIdParam, async (r
 });
 
 // Reactivate a canceled subscription
-router.post('/subscriptions/:id/reactivate', authenticate, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/subscriptions/:id/reactivate', authenticate, idleTimeout, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -592,7 +600,7 @@ router.post('/subscriptions/:id/reactivate', authenticate, validateIdParam, asyn
 });
 
 // Get usage summary for a subscription
-router.get('/subscriptions/:id/usage', authenticate, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/subscriptions/:id/usage', authenticate, idleTimeout, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -613,7 +621,7 @@ router.get('/subscriptions/:id/usage', authenticate, validateIdParam, async (req
 });
 
 // Get usage records for a subscription
-router.get('/subscriptions/:id/usage/records', authenticate, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/subscriptions/:id/usage/records', authenticate, idleTimeout, validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -631,7 +639,7 @@ router.get('/subscriptions/:id/usage/records', authenticate, validateIdParam, as
 });
 
 // Get refunds
-router.get('/refunds', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/refunds', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
@@ -759,6 +767,7 @@ router.post('/invite/:token/accept', authRateLimit, async (req, res: Response) =
       if (authProvider instanceof JWTAuthProvider) {
         authProvider.setAuthCookie(res, authResult.token);
       }
+      await seedSession(authResult.token);
 
       res.json({
         success: true,
@@ -794,7 +803,7 @@ router.post('/invite/:token/accept', authRateLimit, async (req, res: Response) =
 });
 
 // Get my seat assignments (authenticated)
-router.get('/seats', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/seats', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });

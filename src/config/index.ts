@@ -94,6 +94,21 @@ const envSchema = z.object({
   // Request Configuration
   REQUEST_TIMEOUT_MS: z.string().default('30000'),
   REQUEST_BODY_LIMIT: z.string().default('10mb'),
+
+  // Session idle timeout (warns at SESSION_IDLE_WARN_MS, signs out at
+  // SESSION_IDLE_TIMEOUT_MS). Frontend reads SESSION_IDLE_* via /api/auth/idle-config.
+  SESSION_IDLE_TIMEOUT_MS: z.string().default('900000'),
+  SESSION_IDLE_WARN_MS: z.string().default('840000'),
+
+  // mTLS Agent CA (P1.1 — bootstrap; P1.2 — enroll endpoint)
+  // Off by default; customers opt-in per their deployment.
+  MTLS_AGENT_CA_ENABLED: z.string().default('false'),
+  MTLS_CA_SECRET_NAME: z.string().default('preprod/silo-license-ca'),
+  MTLS_CA_REGION: z.string().optional(),
+  MTLS_CA_COMMON_NAME: z.string().default('SILO License CA'),
+  MTLS_CA_ORG: z.string().default('SILO'),
+  MTLS_CA_VALIDITY_YEARS: z.string().default('10'),
+  MTLS_AGENT_CERT_VALIDITY_DAYS: z.string().default('30'),
 });
 
 function loadConfig() {

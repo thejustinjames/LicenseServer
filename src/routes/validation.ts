@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { validationRateLimit } from '../middleware/rateLimit.js';
 import * as licenseService from '../services/license.service.js';
+import * as agentService from '../services/agent.service.js';
+import * as crlService from '../services/crl.service.js';
+import { isMtlsCaEnabled } from '../services/ca.service.js';
 import { getPublicKey } from '../utils/crypto.js';
 import { logger } from '../services/logger.service.js';
 
@@ -13,6 +16,10 @@ const validateSchema = z.object({
   licenseKey: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
   machineFingerprint: z.string().optional(),
   productId: z.string().uuid().optional(),
+  /** Optional: deployable component this validation is for
+   *  (cortex / dashboard / ml / dist / agent / core). When set, the
+   *  response is `valid: false` if the license doesn't enable it. */
+  component: z.string().min(1).max(64).optional(),
 });
 
 const activateSchema = z.object({
@@ -31,7 +38,8 @@ router.post('/validate', async (req: Request, res: Response) => {
     const data = validateSchema.parse(req.body);
     const result = await licenseService.validateLicense(
       data.licenseKey,
-      data.machineFingerprint
+      data.machineFingerprint,
+      data.component,
     );
 
     if (!result.valid) {
@@ -47,6 +55,39 @@ router.post('/validate', async (req: Request, res: Response) => {
     }
     logger.error('Validate error:', error);
     res.status(500).json({ valid: false, error: 'Validation failed' });
+  }
+});
+
+/**
+ * GET /api/v1/licenses/:key/components
+ *
+ * Returns the deployable components this license authorises. Used by
+ * SILO deployment tooling to know which services to spin up
+ * (cortex/dashboard/ml/dist/etc.) on a per-license basis. The list is the
+ * per-license `enabledComponents` override if non-empty, else the
+ * product's `components`.
+ */
+router.get('/licenses/:key/components', async (req: Request, res: Response) => {
+  try {
+    const key = req.params.key;
+    if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) {
+      res.status(400).json({ error: 'Invalid license key format' });
+      return;
+    }
+    const result = await licenseService.validateLicense(key);
+    if (!result.valid) {
+      res.status(400).json(result);
+      return;
+    }
+    res.json({
+      valid: true,
+      product: result.product,
+      components: result.components || [],
+      features: result.features || [],
+    });
+  } catch (error) {
+    logger.error('Components lookup error:', error);
+    res.status(500).json({ error: 'Components lookup failed' });
   }
 });
 
@@ -105,6 +146,62 @@ router.post('/deactivate', async (req: Request, res: Response) => {
     }
     logger.error('Deactivate error:', error);
     res.status(500).json({ success: false, error: 'Deactivation failed' });
+  }
+});
+
+// mTLS agent enrollment — exchange CSR for short-lived client cert.
+// Customer-opt-in via MTLS_AGENT_CA_ENABLED; returns 503 when disabled.
+const enrollSchema = z.object({
+  licenseKey: z
+    .string()
+    .regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, 'Invalid license key format'),
+  machineFingerprint: z.string().min(1).max(256),
+  csr: z.string().min(64).max(16384),
+  requestedValidityDays: z.number().int().positive().max(365).optional(),
+});
+
+router.post('/agents/enroll', async (req: Request, res: Response) => {
+  try {
+    const data = enrollSchema.parse(req.body);
+    const result = await agentService.enrollAgent({
+      licenseKey: data.licenseKey,
+      machineFingerprint: data.machineFingerprint,
+      csrPem: data.csr,
+      requestedValidityDays: data.requestedValidityDays,
+    });
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid request', details: error.errors });
+      return;
+    }
+    if (error instanceof agentService.EnrollmentError) {
+      res.status(error.code).json({ error: error.message });
+      return;
+    }
+    logger.error('Agent enrollment error:', error);
+    res.status(500).json({ error: 'Agent enrollment failed' });
+  }
+});
+
+// CRL endpoint — fetched periodically by Cortex. Public on purpose: a CRL
+// is signed by the CA and reveals only revoked serials, no secrets.
+// Returns 503 when MTLS_AGENT_CA_ENABLED is off.
+router.get('/agents/crl', async (_req: Request, res: Response) => {
+  try {
+    if (!isMtlsCaEnabled()) {
+      res.status(503).json({ error: 'mTLS agent CRL is disabled on this deployment' });
+      return;
+    }
+    const bundle = await crlService.buildCRL();
+    res.set('Content-Type', 'application/x-pem-file');
+    res.set('Cache-Control', `public, max-age=${Math.floor((bundle.nextUpdate.getTime() - Date.now()) / 1000)}`);
+    res.set('X-CRL-Revoked-Count', String(bundle.revokedCount));
+    res.set('X-CRL-Next-Update', bundle.nextUpdate.toISOString());
+    res.send(bundle.crlPem);
+  } catch (error) {
+    logger.error('CRL build error:', error);
+    res.status(500).json({ error: 'CRL build failed' });
   }
 });
 

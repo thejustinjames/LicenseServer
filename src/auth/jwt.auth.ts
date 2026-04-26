@@ -340,7 +340,7 @@ export class JWTAuthProvider implements AuthProviderInterface {
   async rotateTokens(
     oldRefreshToken: string,
     res: Response
-  ): Promise<{ success: boolean; error?: string; user?: AuthUser }> {
+  ): Promise<{ success: boolean; error?: string; user?: AuthUser; accessToken?: string }> {
     const result = await this.verifyRefreshToken(oldRefreshToken);
 
     if (!result.user) {
@@ -372,7 +372,7 @@ export class JWTAuthProvider implements AuthProviderInterface {
       success: true,
     });
 
-    return { success: true, user: result.user };
+    return { success: true, user: result.user, accessToken: accessToken.token };
   }
 
   /**

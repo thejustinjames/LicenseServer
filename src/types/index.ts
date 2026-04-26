@@ -8,6 +8,13 @@ export interface AuthenticatedRequest extends Request {
     isAdmin: boolean;
     cognitoSub?: string;
     groups?: string[];
+    /** Which Cognito pool issued the token (when AUTH_PROVIDER=cognito). */
+    pool?: 'staff' | 'customer';
+    /** Authentication methods reference. Cognito sets this on tokens that
+     *  completed MFA, e.g. ["mfa", "totp_mfa"]. */
+    amr?: string[];
+    /** True iff `amr` proves MFA was used in the current session. */
+    mfaAuthenticated?: boolean;
   };
   token?: string;
   tokenPayload?: {
@@ -31,6 +38,8 @@ export interface LicenseValidationResponse {
   product?: string;
   expiresAt?: string;
   features?: string[];
+  /** Components this license is authorised to deploy (cortex, dashboard, ml, dist, etc.). */
+  components?: string[];
   error?: string;
 }
 

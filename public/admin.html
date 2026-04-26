@@ -93,22 +93,13 @@
     </aside>
 
     <main class="admin-main">
-      <!-- Login Section -->
+      <!-- Auth gate: when not signed in this section is shown briefly,
+           then admin.js redirects to / for the unified login. -->
       <section id="login" class="admin-section active">
         <div class="auth-container">
-          <h2>Admin Login</h2>
-          <div id="loginAlert"></div>
-          <form id="loginForm">
-            <div class="form-group">
-              <label for="loginEmail">Email</label>
-              <input type="email" id="loginEmail" required placeholder="admin@example.com">
-            </div>
-            <div class="form-group">
-              <label for="loginPassword">Password</label>
-              <input type="password" id="loginPassword" required placeholder="Password">
-            </div>
-            <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
-          </form>
+          <h2>Admin sign-in required</h2>
+          <p>Redirecting to the sign-in page…</p>
+          <p><a href="/" class="btn btn-primary">Go to sign-in</a></p>
         </div>
       </section>
 
@@ -194,7 +185,12 @@
       <section id="licenses" class="admin-section">
         <div class="section-header">
           <h1>Licenses</h1>
-          <button class="btn btn-primary" id="addLicenseBtn">+ Create License</button>
+          <div>
+            <button class="btn btn-secondary" id="testLicenseBtn" title="Issue a test license without going through Stripe">
+              Generate Test License
+            </button>
+            <button class="btn btn-primary" id="addLicenseBtn">+ Create License</button>
+          </div>
         </div>
 
         <div class="table-container">
@@ -759,6 +755,16 @@ enum EnterpriseFeature {
         </div>
 
         <div class="form-group">
+          <label for="licenseSeatCount">Seat Count (optional, defaults to product default)</label>
+          <input type="number" id="licenseSeatCount" min="1" placeholder="e.g. 5 for Cortex Business">
+        </div>
+
+        <div class="form-group">
+          <label for="licenseEnabledComponents">Enabled components (comma-separated, leave blank to inherit from product)</label>
+          <input type="text" id="licenseEnabledComponents" placeholder="e.g. core,cortex,dashboard,ml,dist">
+        </div>
+
+        <div class="form-group">
           <label for="licenseMaxActivations">Max Activations</label>
           <input type="number" id="licenseMaxActivations" min="1" value="1">
         </div>
@@ -773,6 +779,84 @@ enum EnterpriseFeature {
           <button type="submit" class="btn btn-primary">Create License</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Test License Modal (one-click QA issuance, no Stripe) -->
+  <div class="modal" id="testLicenseModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Generate Test License</h2>
+        <button class="modal-close" id="closeTestLicenseModal">&times;</button>
+      </div>
+      <form id="testLicenseForm">
+        <p style="color: #64748b; margin: 0 0 1rem;">
+          Issues a license keyed against the <code>qa-tester@licenseserver.test</code> customer
+          (auto-created on first use). The license is tagged
+          <code>metadata.test = true</code> so test data can be cleaned up later.
+        </p>
+
+        <div class="form-group">
+          <label for="testLicenseProduct">Product *</label>
+          <select id="testLicenseProduct" required>
+            <option value="">Select a product...</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="testLicenseSeatCount">Seat count override</label>
+            <input type="number" id="testLicenseSeatCount" min="1" placeholder="(product default)">
+          </div>
+          <div class="form-group">
+            <label for="testLicenseExpiresInDays">Expires in (days)</label>
+            <input type="number" id="testLicenseExpiresInDays" min="1" max="3650" placeholder="(no expiry)">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="testLicenseCustomerEmail">Customer email override</label>
+          <input type="email" id="testLicenseCustomerEmail" placeholder="qa-tester@licenseserver.test">
+        </div>
+
+        <div class="form-group">
+          <label for="testLicenseEnabledComponents">Enabled components (comma-separated, leave blank to inherit)</label>
+          <input type="text" id="testLicenseEnabledComponents" placeholder="e.g. cortex,dashboard">
+        </div>
+
+        <div class="form-group">
+          <label for="testLicenseNote">Note (optional, stored in metadata)</label>
+          <input type="text" id="testLicenseNote" maxlength="200" placeholder="e.g. Cortex sidecar smoke test 2026-04-25">
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelTestLicenseBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Issue Test License</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- License Result Modal — shown after a license is created so the key
+       can be copied without scraping it out of an alert(). -->
+  <div class="modal" id="licenseResultModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>License issued</h2>
+        <button class="modal-close" id="closeLicenseResultModal">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>License key</label>
+        <div style="display: flex; gap: 0.5rem; align-items: stretch;">
+          <input type="text" id="licenseResultKey" readonly
+                 style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.95rem; flex: 1;">
+          <button type="button" class="btn btn-secondary" id="copyLicenseKeyBtn">Copy</button>
+        </div>
+        <p id="licenseResultMeta" style="color: #64748b; margin: 0.5rem 0 0; font-size: 0.9rem;"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="closeLicenseResultBtn">Done</button>
+      </div>
     </div>
   </div>
 
@@ -910,6 +994,7 @@ enum EnterpriseFeature {
     </div>
   </div>
 
+  <script src="/idleTimer.js"></script>
   <script src="/admin.js"></script>
   <script>
     // SILO Product Definitions
