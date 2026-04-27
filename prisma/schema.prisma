@@ -181,6 +181,7 @@ model License {
   product         Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
   activations     LicenseActivation[]
   seatAssignments SeatAssignment[]
+  seatPacks       LicenseSeatPack[]
 
   @@index([customerId])
   @@index([productId])
@@ -266,6 +267,35 @@ model SeatAssignment {
   @@index([email])
   @@index([inviteToken])
   @@map("seat_assignments")
+}
+
+// Enterprise seat-pack purchases. Each row records a single pack of 5 or 10
+// agent seats granted to a License (typically a TEAM/ENTERPRISE license).
+// License.seatCount is the running sum of unexpired pack sizes — kept in
+// sync by the entitlement service, not Prisma. Pack composition is preserved
+// (5s vs 10s) so the customer's Cortex can render a "X × 10-packs + Y ×
+// 5-packs" breakdown in its dashboard.
+//
+// CHECK constraint on packSize ∈ {5, 10} is added via raw SQL in the
+// migration — Prisma's schema language doesn't express it natively.
+model LicenseSeatPack {
+  id                 String    @id @default(uuid())
+  licenseId          String    @map("license_id")
+  packSize           Int       @map("pack_size")            // 5 or 10 only (CHECK in migration)
+  grantedAt          DateTime  @default(now()) @map("granted_at")
+  grantedBy          String?   @map("granted_by")            // Admin user id who applied the pack
+  purchaseOrderRef   String?   @map("purchase_order_ref")    // Stripe charge / contract / PO ref
+  expiresAt          DateTime? @map("expires_at")            // null = perpetual; set for promo packs
+  revokedAt          DateTime? @map("revoked_at")            // null = active; set on refund / chargeback
+  revokedReason      String?   @map("revoked_reason")
+  notes              String?
+
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@index([licenseId])
+  @@index([revokedAt])
+  @@index([expiresAt])
+  @@map("license_seat_packs")
 }
 
 // mTLS agent client certificate issuance ledger
