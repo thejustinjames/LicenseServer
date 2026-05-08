@@ -85,14 +85,14 @@ export async function getOrCreateCreditBalance(customerId: string): Promise<Cred
   }
 
   return {
-    available: balance.availableCents,
-    reserved: balance.reservedCents,
-    effective: balance.availableCents - balance.reservedCents,
+    available: Number(balance.availableCents),
+    reserved: Number(balance.reservedCents),
+    effective: Number(balance.availableCents - balance.reservedCents),
     lifetime: {
-      purchased: balance.totalPurchased,
-      consumed: balance.totalConsumed,
-      bonus: balance.totalBonus,
-      refunded: balance.totalRefunded,
+      purchased: Number(balance.totalPurchased),
+      consumed: Number(balance.totalConsumed),
+      bonus: Number(balance.totalBonus),
+      refunded: Number(balance.totalRefunded),
     },
     autoRefill: {
       enabled: balance.autoRefillEnabled,
@@ -104,7 +104,7 @@ export async function getOrCreateCreditBalance(customerId: string): Promise<Cred
       requiresReauth: balance.autoRefillCurrentCount >= balance.autoRefillMaxCount,
       paymentMethodLast4,
     },
-    lowBalanceAlertCents: balance.lowBalanceAlertCents,
+    lowBalanceAlertCents: balance.lowBalanceAlertCents ?? 0,
   };
 }
 
@@ -168,12 +168,12 @@ export async function reserveCredits(
     }
 
     const effective = balance.availableCents - balance.reservedCents;
-    if (effective < amountCents) {
+    if (effective < BigInt(amountCents)) {
       return {
         success: false,
         reservationId: '',
         amountReserved: 0,
-        available: effective,
+        available: Number(effective),
         error: 'Insufficient credits',
       };
     }
@@ -197,14 +197,14 @@ export async function reserveCredits(
     // Update reserved amount
     await tx.creditBalance.update({
       where: { id: balance.id },
-      data: { reservedCents: balance.reservedCents + amountCents },
+      data: { reservedCents: balance.reservedCents + BigInt(amountCents) },
     });
 
     return {
       success: true,
       reservationId,
       amountReserved: amountCents,
-      available: effective - amountCents,
+      available: Number(effective) - amountCents,
     };
   });
 }
@@ -298,6 +298,8 @@ export async function consumeCredits(
     });
 
     const reservedAmount = reservation ? Math.abs(reservation.amountCents) : actualAmountCents;
+    const actualBigInt = BigInt(actualAmountCents);
+    const reservedBigInt = BigInt(reservedAmount);
 
     // Create consumption transaction
     const transaction = await tx.creditTransaction.create({
@@ -307,7 +309,7 @@ export async function consumeCredits(
         status: CreditTransactionStatus.COMPLETED,
         amountCents: -actualAmountCents,
         balanceBefore: balance.availableCents,
-        balanceAfter: balance.availableCents - actualAmountCents,
+        balanceAfter: balance.availableCents - actualBigInt,
         externalCallId: usage.externalCallId,
         model: usage.model,
         provider: usage.provider,
@@ -318,12 +320,13 @@ export async function consumeCredits(
     });
 
     // Update balance
+    const newReserved = balance.reservedCents - reservedBigInt;
     const updated = await tx.creditBalance.update({
       where: { id: balance.id },
       data: {
-        availableCents: balance.availableCents - actualAmountCents,
-        reservedCents: Math.max(0, balance.reservedCents - reservedAmount),
-        totalConsumed: balance.totalConsumed + actualAmountCents,
+        availableCents: balance.availableCents - actualBigInt,
+        reservedCents: newReserved < 0n ? 0n : newReserved,
+        totalConsumed: balance.totalConsumed + actualBigInt,
       },
     });
 
@@ -335,7 +338,7 @@ export async function consumeCredits(
 
     return {
       success: true,
-      newBalance: updated.availableCents,
+      newBalance: Number(updated.availableCents),
       transactionId: transaction.id,
       autoRefillTriggered,
     };
@@ -371,7 +374,7 @@ export async function addPurchasedCredits(
       where: { id: existing.creditBalanceId },
     });
     return {
-      newBalance: balance?.availableCents || 0,
+      newBalance: Number(balance?.availableCents || 0),
       transactionId: existing.id,
     };
   }
@@ -387,7 +390,9 @@ export async function addPurchasedCredits(
       });
     }
 
-    const totalAmount = amountCents + bonusCents;
+    const totalAmount = BigInt(amountCents + bonusCents);
+    const amountBigInt = BigInt(amountCents);
+    const bonusBigInt = BigInt(bonusCents);
 
     // Create purchase transaction
     const transaction = await tx.creditTransaction.create({
@@ -397,7 +402,7 @@ export async function addPurchasedCredits(
         status: CreditTransactionStatus.COMPLETED,
         amountCents: amountCents,
         balanceBefore: balance.availableCents,
-        balanceAfter: balance.availableCents + amountCents,
+        balanceAfter: balance.availableCents + amountBigInt,
         stripePaymentIntentId: payment.stripePaymentIntentId,
         stripeChargeId: payment.stripeChargeId,
         packageId: payment.packageId,
@@ -413,7 +418,7 @@ export async function addPurchasedCredits(
           type: CreditTransactionType.BONUS,
           status: CreditTransactionStatus.COMPLETED,
           amountCents: bonusCents,
-          balanceBefore: balance.availableCents + amountCents,
+          balanceBefore: balance.availableCents + amountBigInt,
           balanceAfter: balance.availableCents + totalAmount,
           description: 'Purchase bonus',
         },
@@ -425,8 +430,8 @@ export async function addPurchasedCredits(
       where: { id: balance.id },
       data: {
         availableCents: balance.availableCents + totalAmount,
-        totalPurchased: balance.totalPurchased + amountCents,
-        totalBonus: balance.totalBonus + bonusCents,
+        totalPurchased: balance.totalPurchased + amountBigInt,
+        totalBonus: balance.totalBonus + bonusBigInt,
       },
     });
 
@@ -442,7 +447,7 @@ export async function addPurchasedCredits(
     }
 
     return {
-      newBalance: updated.availableCents,
+      newBalance: Number(updated.availableCents),
       transactionId: transaction.id,
     };
   });
