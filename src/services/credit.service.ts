@@ -751,7 +751,7 @@ export async function refundCredits(
     }
 
     // Deduct the refunded amount (can go negative if user spent credits)
-    const newAvailable = Math.max(0, balance.availableCents - amountCents);
+    const newAvailable = BigInt(Math.max(0, Number(balance.availableCents) - amountCents));
 
     await tx.creditTransaction.create({
       data: {
@@ -770,11 +770,11 @@ export async function refundCredits(
       where: { id: balance.id },
       data: {
         availableCents: newAvailable,
-        totalRefunded: balance.totalRefunded + amountCents,
+        totalRefunded: BigInt(Number(balance.totalRefunded) + amountCents),
       },
     });
 
-    return { success: true, newBalance: updated.availableCents };
+    return { success: true, newBalance: Number(updated.availableCents) };
   });
 }
 
@@ -802,7 +802,7 @@ export async function adjustCredits(
       });
     }
 
-    const newAvailable = Math.max(0, balance.availableCents + amountCents);
+    const newAvailable = BigInt(Math.max(0, Number(balance.availableCents) + amountCents));
 
     const transaction = await tx.creditTransaction.create({
       data: {
@@ -824,7 +824,7 @@ export async function adjustCredits(
 
     return {
       success: true,
-      newBalance: updated.availableCents,
+      newBalance: Number(updated.availableCents),
       transactionId: transaction.id,
     };
   });

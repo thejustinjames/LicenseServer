@@ -477,6 +477,7 @@ model CreditBalance {
   reservedCents          BigInt @default(0) @map("reserved_cents") // In-flight LLM calls
   lifetimePurchasedCents BigInt @default(0) @map("lifetime_purchased_cents")
   lifetimeUsedCents      BigInt @default(0) @map("lifetime_used_cents")
+  totalRefunded          BigInt @default(0) @map("total_refunded")
 
   // Auto-refill configuration
   autoRefillEnabled        Boolean   @default(false) @map("auto_refill_enabled")
@@ -511,11 +512,13 @@ model CreditTransaction {
   status CreditTransactionStatus @default(COMPLETED)
 
   // Amount (positive for credits in, negative for usage)
-  amountCents       Int    @map("amount_cents")
-  balanceAfterCents BigInt @map("balance_after_cents")
+  amountCents    Int    @map("amount_cents")
+  balanceBefore  BigInt @map("balance_before")
+  balanceAfter   BigInt @map("balance_after")
 
   // For PURCHASE transactions
   stripePaymentIntentId String? @map("stripe_payment_intent_id")
+  stripeChargeId        String? @map("stripe_charge_id") // For refunds
   packageId             String? @map("package_id")
 
   // For USAGE transactions (from Predict)
@@ -563,9 +566,11 @@ model CreditPackage {
   stripePriceId   String? @unique @map("stripe_price_id")
 
   // Display
-  isPopular Boolean @default(false) @map("is_popular")
-  sortOrder Int     @default(0) @map("sort_order")
-  isActive  Boolean @default(true) @map("is_active")
+  isPopular  Boolean   @default(false) @map("is_popular")
+  sortOrder  Int       @default(0) @map("sort_order")
+  isActive   Boolean   @default(true) @map("is_active")
+  badge      String?   // "Best Value", "Most Popular", etc.
+  validUntil DateTime? @map("valid_until") // Package expiry date
 
   // Audit
   createdBy String  @map("created_by")
