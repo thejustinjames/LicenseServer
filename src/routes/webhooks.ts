@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { stripe } from '../config/stripe.js';
 import { config } from '../config/index.js';
 import * as paymentService from '../services/payment.service.js';
+import * as creditService from '../services/credit.service.js';
 import { webhookRateLimit } from '../middleware/rateLimit.js';
 import { logger } from '../services/logger.service.js';
 import Stripe from 'stripe';
@@ -63,7 +64,34 @@ router.post(
         // =====================================================================
         case 'checkout.session.completed': {
           const session = event.data.object as Stripe.Checkout.Session;
-          await paymentService.handleCheckoutCompleted(session);
+
+          // Check if this is a credit purchase
+          if (session.metadata?.type === 'credit_purchase') {
+            const { customerId, packageId, creditAmount, bonusAmount } = session.metadata;
+
+            if (customerId && creditAmount) {
+              await creditService.addPurchasedCredits(
+                customerId,
+                parseInt(creditAmount, 10),
+                parseInt(bonusAmount || '0', 10),
+                {
+                  stripePaymentIntentId: session.payment_intent as string,
+                  packageId: packageId || undefined,
+                },
+                `checkout:${session.id}`
+              );
+
+              logger.info('Credit purchase completed via checkout', {
+                customerId,
+                creditAmount,
+                bonusAmount,
+                sessionId: session.id,
+              });
+            }
+          } else {
+            // Regular product/subscription checkout
+            await paymentService.handleCheckoutCompleted(session);
+          }
           break;
         }
 
@@ -135,7 +163,34 @@ router.post(
         // =====================================================================
         case 'charge.refunded': {
           const charge = event.data.object as Stripe.Charge;
-          await paymentService.handleChargeRefunded(charge);
+
+          // Check if this was a credit purchase refund
+          const paymentIntent = charge.payment_intent
+            ? await stripe.paymentIntents.retrieve(charge.payment_intent as string)
+            : null;
+
+          if (paymentIntent?.metadata?.type === 'credit_purchase') {
+            const { customerId } = paymentIntent.metadata;
+            const refundAmount = charge.amount_refunded;
+
+            if (customerId && refundAmount > 0) {
+              await creditService.refundCredits(
+                customerId,
+                refundAmount,
+                charge.id,
+                'Stripe refund'
+              );
+
+              logger.info('Credit refund processed', {
+                customerId,
+                refundAmount,
+                chargeId: charge.id,
+              });
+            }
+          } else {
+            // Regular product/subscription refund
+            await paymentService.handleChargeRefunded(charge);
+          }
           break;
         }
 

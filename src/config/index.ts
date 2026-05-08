@@ -12,6 +12,7 @@ const envSchema = z.object({
 
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
+  ADMIN_API_KEY: z.string().min(32).optional(),
 
   STRIPE_SECRET_KEY: z.string(),
   STRIPE_WEBHOOK_SECRET: z.string(),

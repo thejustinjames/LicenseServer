@@ -818,4 +818,275 @@ router.get('/seats', authenticate, idleTimeout, async (req: AuthenticatedRequest
   }
 });
 
+// ============================================================================
+// CREDIT ROUTES
+// ============================================================================
+
+import * as creditService from '../services/credit.service.js';
+import { CreditTransactionType } from '@prisma/client';
+
+// Get credit balance
+router.get('/credits', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const balance = await creditService.getOrCreateCreditBalance(req.user.id);
+    res.json({ success: true, data: balance });
+  } catch (error) {
+    logger.error('Get credits error:', error);
+    res.status(500).json({ error: 'Failed to get credit balance' });
+  }
+});
+
+// List credit packages
+router.get('/credits/packages', async (_req, res: Response) => {
+  try {
+    const packages = await creditService.listCreditPackages();
+    res.json({ success: true, data: packages });
+  } catch (error) {
+    logger.error('List credit packages error:', error);
+    res.status(500).json({ error: 'Failed to list credit packages' });
+  }
+});
+
+// Create checkout session for credit purchase
+const creditCheckoutSchema = z.object({
+  packageId: z.string().uuid(),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+});
+
+router.post('/credits/checkout', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const data = creditCheckoutSchema.parse(req.body);
+    const session = await creditService.createCreditCheckoutSession(
+      req.user.id,
+      data.packageId,
+      data.successUrl,
+      data.cancelUrl
+    );
+
+    res.json({ success: true, data: session });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Credit checkout error:', error);
+    res.status(500).json({ error: 'Failed to create checkout session' });
+  }
+});
+
+// Purchase credits directly with saved payment method
+const directPurchaseSchema = z.object({
+  packageId: z.string().uuid(),
+  paymentMethodId: z.string(),
+});
+
+router.post('/credits/purchase', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const data = directPurchaseSchema.parse(req.body);
+    const result = await creditService.purchaseCreditsDirectly(
+      req.user.id,
+      data.packageId,
+      data.paymentMethodId
+    );
+
+    if (!result.success) {
+      res.status(400).json({ success: false, error: result.error });
+      return;
+    }
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Direct credit purchase error:', error);
+    res.status(500).json({ error: 'Failed to purchase credits' });
+  }
+});
+
+// Get credit transaction history
+router.get('/credits/transactions', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const limit = parsePositiveInt(req.query.limit as string, 50);
+    const offset = parsePositiveInt(req.query.offset as string, 0);
+    const type = req.query.type as string | undefined;
+
+    const result = await creditService.getTransactionHistory(req.user.id, {
+      limit,
+      offset,
+      type: type && type !== 'all' ? type as CreditTransactionType : undefined,
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    logger.error('Get credit transactions error:', error);
+    res.status(500).json({ error: 'Failed to get transaction history' });
+  }
+});
+
+// Configure auto-refill
+const autoRefillSchema = z.object({
+  enabled: z.boolean(),
+  packageId: z.string().uuid().optional(),
+  triggerCents: z.number().int().positive().optional(),
+  paymentMethodId: z.string().optional(),
+});
+
+router.put('/credits/auto-refill', authenticate, idleTimeout, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const data = autoRefillSchema.parse(req.body);
+    const balance = await creditService.configureAutoRefill(req.user.id, data);
+
+    res.json({ success: true, data: balance });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Configure auto-refill error:', error);
+    res.status(500).json({ error: 'Failed to configure auto-refill' });
+  }
+});
+
+// Reserve credits (called from Predict before LLM call)
+const reserveSchema = z.object({
+  amountCents: z.number().int().positive(),
+  idempotencyKey: z.string(),
+});
+
+router.post('/credits/reserve', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const data = reserveSchema.parse(req.body);
+    const result = await creditService.reserveCredits(
+      req.user.id,
+      data.amountCents,
+      data.idempotencyKey
+    );
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Reserve credits error:', error);
+    res.status(500).json({ error: 'Failed to reserve credits' });
+  }
+});
+
+// Consume credits (called from Predict after successful LLM call)
+const consumeSchema = z.object({
+  reservationId: z.string(),
+  amountCents: z.number().int().positive(),
+  usage: z.object({
+    externalCallId: z.string().optional(),
+    model: z.string().optional(),
+    provider: z.string().optional(),
+    inputTokens: z.number().int().optional(),
+    outputTokens: z.number().int().optional(),
+  }).optional(),
+});
+
+router.post('/credits/consume', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const data = consumeSchema.parse(req.body);
+    const result = await creditService.consumeCredits(
+      req.user.id,
+      data.reservationId,
+      data.amountCents,
+      data.usage || {}
+    );
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Consume credits error:', error);
+    res.status(500).json({ error: 'Failed to consume credits' });
+  }
+});
+
+// Release reservation (called from Predict on LLM call failure)
+const releaseSchema = z.object({
+  reservationId: z.string(),
+});
+
+router.post('/credits/release', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const data = releaseSchema.parse(req.body);
+    const result = await creditService.releaseReservation(req.user.id, data.reservationId);
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Release credits error:', error);
+    res.status(500).json({ error: 'Failed to release reservation' });
+  }
+});
+
+// Check credit balance (quick check for Predict)
+router.get('/credits/check', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const requiredCents = parsePositiveInt(req.query.required as string, 0);
+    const result = await creditService.checkCredits(req.user.id, requiredCents);
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    logger.error('Check credits error:', error);
+    res.status(500).json({ error: 'Failed to check credits' });
+  }
+});
+
 export default router;

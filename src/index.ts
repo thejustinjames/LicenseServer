@@ -26,6 +26,7 @@ import desktopRoutes from './routes/desktop.js';
 import customerAuthRoutes from './routes/customerAuth.js';
 import adminAuthRoutes from './routes/adminAuth.js';
 import authRoutes from './routes/auth.js';
+import deploymentRoutes from './routes/deployments.js';
 
 const app = express();
 
@@ -78,6 +79,7 @@ app.use('/api/portal', portalRoutes);
 app.use('/api/customer/auth', customerAuthRoutes);
 app.use('/api/v1', validationRoutes);
 app.use('/api/v1/desktop', desktopRoutes);
+app.use('/api/deployments', deploymentRoutes); // Deployment validation & kill
 app.use('/webhooks', webhookRoutes);
 
 // Serve static frontend

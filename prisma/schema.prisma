@@ -38,17 +38,17 @@ enum PurchaseType {
 }
 
 enum LicenseType {
-  INDIVIDUAL    // Single user license
-  TEAM          // Team license (5-50 seats)
-  ENTERPRISE    // Enterprise/unlimited license
-  PLUGIN        // Add-on plugin license
-  TRIAL         // Time-limited trial
+  INDIVIDUAL // Single user license
+  TEAM // Team license (5-50 seats)
+  ENTERPRISE // Enterprise/unlimited license
+  PLUGIN // Add-on plugin license
+  TRIAL // Time-limited trial
 }
 
 enum LicenseTerm {
-  SUBSCRIPTION  // Monthly/Annual recurring
-  PERPETUAL     // One-time purchase
-  MULTI_YEAR    // 2-3 year terms
+  SUBSCRIPTION // Monthly/Annual recurring
+  PERPETUAL // One-time purchase
+  MULTI_YEAR // 2-3 year terms
 }
 
 enum Platform {
@@ -59,43 +59,43 @@ enum Platform {
 }
 
 model Product {
-  id                   String         @id @default(uuid())
-  name                 String
-  description          String?
-  category             String?
-  stripeProductId      String?        @unique @map("stripe_product_id")
-  stripePriceId        String?        @map("stripe_price_id")
-  stripePriceIdAnnual  String?        @map("stripe_price_id_annual")
-  priceMonthly         Int?           @map("price_monthly")       // Price in cents
-  priceAnnual          Int?           @map("price_annual")        // Price in cents
-  validationMode       ValidationMode @default(ONLINE) @map("validation_mode")
-  pricingType          PricingType    @default(FIXED) @map("pricing_type")
-  purchaseType         PurchaseType   @default(SUBSCRIPTION) @map("purchase_type")
-  licenseDurationDays  Int?           @map("license_duration_days")
-  s3PackageKey         String?        @map("s3_package_key")
-  version              String?
-  features             String[]       @default([])
-  createdAt            DateTime       @default(now()) @map("created_at")
-  updatedAt            DateTime       @updatedAt @map("updated_at")
+  id                  String         @id @default(uuid())
+  name                String
+  description         String?
+  category            String?
+  stripeProductId     String?        @unique @map("stripe_product_id")
+  stripePriceId       String?        @map("stripe_price_id")
+  stripePriceIdAnnual String?        @map("stripe_price_id_annual")
+  priceMonthly        Int?           @map("price_monthly") // Price in cents
+  priceAnnual         Int?           @map("price_annual") // Price in cents
+  validationMode      ValidationMode @default(ONLINE) @map("validation_mode")
+  pricingType         PricingType    @default(FIXED) @map("pricing_type")
+  purchaseType        PurchaseType   @default(SUBSCRIPTION) @map("purchase_type")
+  licenseDurationDays Int?           @map("license_duration_days")
+  s3PackageKey        String?        @map("s3_package_key")
+  version             String?
+  features            String[]       @default([])
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
 
   // Platform targeting
-  platforms            Platform[]     @default([WEB])
-  requiresActivation   Boolean        @default(true) @map("requires_activation")
+  platforms          Platform[] @default([WEB])
+  requiresActivation Boolean    @default(true) @map("requires_activation")
 
   // Seat configuration for team products
-  defaultSeatCount     Int            @default(1) @map("default_seat_count")
-  maxSeatCount         Int?           @map("max_seat_count")
-  seatPriceMonthly     Int?           @map("seat_price_monthly")    // Per-seat price in cents
-  seatPriceAnnual      Int?           @map("seat_price_annual")     // Per-seat price in cents
+  defaultSeatCount Int  @default(1) @map("default_seat_count")
+  maxSeatCount     Int? @map("max_seat_count")
+  seatPriceMonthly Int? @map("seat_price_monthly") // Per-seat price in cents
+  seatPriceAnnual  Int? @map("seat_price_annual") // Per-seat price in cents
 
   // Desktop app configuration
-  offlineGraceDays     Int            @default(7) @map("offline_grace_days")
-  checkInIntervalDays  Int            @default(7) @map("check_in_interval_days")
+  offlineGraceDays    Int @default(7) @map("offline_grace_days")
+  checkInIntervalDays Int @default(7) @map("check_in_interval_days")
 
   // Product relationships (for plugins/add-ons)
-  parentProductId      String?        @map("parent_product_id")
-  parentProduct        Product?       @relation("ProductAddons", fields: [parentProductId], references: [id])
-  addons               Product[]      @relation("ProductAddons")
+  parentProductId String?   @map("parent_product_id")
+  parentProduct   Product?  @relation("ProductAddons", fields: [parentProductId], references: [id])
+  addons          Product[] @relation("ProductAddons")
 
   // SILO can deploy individual services (cortex, dist, dashboard, ml, etc.).
   // `components` is the maximum set this SKU is permitted to enable. A
@@ -103,10 +103,15 @@ model Product {
   // narrows the set (e.g. an Enterprise SKU sold without ML for one
   // customer). Free-form string[] so adding a new component doesn't
   // require a schema migration.
-  components           String[]       @default([])
+  components String[] @default([])
 
-  licenses License[]
-  quotes   Quote[]
+  // Deployment validation
+  allowAutoRegister Boolean @default(false) @map("allow_auto_register") // Auto-register dev deployments
+  slug              String? @unique // Product identifier (e.g., "agencio-predict")
+
+  licenses    License[]
+  quotes      Quote[]
+  deployments Deployment[]
 
   @@index([category])
   @@index([parentProductId])
@@ -135,6 +140,8 @@ model Customer {
   refunds             Refund[]
   passwordResetTokens PasswordResetToken[]
   quotes              Quote[]
+  creditBalance       CreditBalance?
+  deployments         Deployment[]
 
   @@map("customers")
 }
@@ -154,33 +161,34 @@ model License {
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
   // Seat-based licensing
-  licenseType        LicenseType   @default(INDIVIDUAL) @map("license_type")
-  seatCount          Int           @default(1) @map("seat_count")
-  seatsUsed          Int           @default(0) @map("seats_used")
+  licenseType LicenseType @default(INDIVIDUAL) @map("license_type")
+  seatCount   Int         @default(1) @map("seat_count")
+  seatsUsed   Int         @default(0) @map("seats_used")
 
   // Volume/Enterprise licensing
-  isVolumeLicense    Boolean       @default(false) @map("is_volume_license")
-  volumeDiscount     Decimal?      @db.Decimal(5, 2) @map("volume_discount")
+  isVolumeLicense Boolean  @default(false) @map("is_volume_license")
+  volumeDiscount  Decimal? @map("volume_discount") @db.Decimal(5, 2)
 
   // License terms
-  licenseTerm        LicenseTerm   @default(SUBSCRIPTION) @map("license_term")
-  renewalDate        DateTime?     @map("renewal_date")
+  licenseTerm LicenseTerm @default(SUBSCRIPTION) @map("license_term")
+  renewalDate DateTime?   @map("renewal_date")
 
   // Per-license override of the product's `components` list. Empty/null
   // means "inherit the product's full component set". Use this to sell an
   // Enterprise SKU but disable ML for a specific customer, or to issue a
   // narrowly-scoped test license that only enables `cortex` + `dashboard`.
-  enabledComponents  String[]      @default([]) @map("enabled_components")
+  enabledComponents String[] @default([]) @map("enabled_components")
 
   // Parent license for seat assignments (organization master license)
-  parentLicenseId    String?       @map("parent_license_id")
-  parentLicense      License?      @relation("SeatHierarchy", fields: [parentLicenseId], references: [id])
-  childLicenses      License[]     @relation("SeatHierarchy")
+  parentLicenseId String?   @map("parent_license_id")
+  parentLicense   License?  @relation("SeatHierarchy", fields: [parentLicenseId], references: [id])
+  childLicenses   License[] @relation("SeatHierarchy")
 
   customer        Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
   product         Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
   activations     LicenseActivation[]
   seatAssignments SeatAssignment[]
+  deployments     Deployment[]
 
   @@index([customerId])
   @@index([productId])
@@ -218,9 +226,9 @@ model LicenseActivation {
   lastSeenAt         DateTime @default(now()) @map("last_seen_at")
 
   // Desktop app tracking
-  platform           Platform? @map("platform")
-  appVersion         String?   @map("app_version")
-  osVersion          String?   @map("os_version")
+  platform   Platform? @map("platform")
+  appVersion String?   @map("app_version")
+  osVersion  String?   @map("os_version")
 
   // Offline token management
   offlineToken       String?   @map("offline_token")
@@ -237,21 +245,21 @@ model LicenseActivation {
 
 // Seat assignment for team/enterprise licenses
 model SeatAssignment {
-  id                 String    @id @default(uuid())
-  licenseId          String    @map("license_id")
+  id        String @id @default(uuid())
+  licenseId String @map("license_id")
 
   // Assigned user
-  email              String
-  name               String?
+  email String
+  name  String?
 
   // Assignment tracking
-  assignedAt         DateTime  @default(now()) @map("assigned_at")
-  assignedBy         String?   @map("assigned_by")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+  assignedBy String?  @map("assigned_by")
 
   // Invite tracking
-  inviteToken        String?   @unique @map("invite_token")
-  inviteSentAt       DateTime? @map("invite_sent_at")
-  inviteAcceptedAt   DateTime? @map("invite_accepted_at")
+  inviteToken      String?   @unique @map("invite_token")
+  inviteSentAt     DateTime? @map("invite_sent_at")
+  inviteAcceptedAt DateTime? @map("invite_accepted_at")
 
   // Activation tracking
   activated          Boolean   @default(false)
@@ -271,19 +279,19 @@ model SeatAssignment {
 // mTLS agent client certificate issuance ledger
 // (one row per cert issued by /api/v1/agents/enroll)
 model AgentCertificate {
-  id                 String    @id @default(uuid())
-  licenseId          String    @map("license_id")
-  machineFingerprint String    @map("machine_fingerprint")
+  id                 String @id @default(uuid())
+  licenseId          String @map("license_id")
+  machineFingerprint String @map("machine_fingerprint")
 
-  serial             String    @unique
-  subject            String
-  fingerprintSha256  String    @map("fingerprint_sha256")
-  notBefore          DateTime  @map("not_before")
-  notAfter           DateTime  @map("not_after")
+  serial            String   @unique
+  subject           String
+  fingerprintSha256 String   @map("fingerprint_sha256")
+  notBefore         DateTime @map("not_before")
+  notAfter          DateTime @map("not_after")
 
-  issuedAt           DateTime  @default(now()) @map("issued_at")
-  revokedAt          DateTime? @map("revoked_at")
-  revokedReason      String?   @map("revoked_reason")
+  issuedAt      DateTime  @default(now()) @map("issued_at")
+  revokedAt     DateTime? @map("revoked_at")
+  revokedReason String?   @map("revoked_reason")
 
   // Loose join: do not cascade — keep ledger after license deletion for audit.
   @@index([licenseId])
@@ -315,17 +323,17 @@ model UsageRecord {
 
 // Refund tracking
 model Refund {
-  id               String   @id @default(uuid())
-  stripeRefundId   String   @unique @map("stripe_refund_id")
-  stripeChargeId   String   @map("stripe_charge_id")
-  customerId       String   @map("customer_id")
-  amount           Int      // Amount in cents
-  currency         String   @default("usd")
-  reason           String?
-  status           String   // succeeded, pending, failed, canceled
-  licensesRevoked  Boolean  @default(false) @map("licenses_revoked")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  stripeRefundId  String   @unique @map("stripe_refund_id")
+  stripeChargeId  String   @map("stripe_charge_id")
+  customerId      String   @map("customer_id")
+  amount          Int // Amount in cents
+  currency        String   @default("usd")
+  reason          String?
+  status          String // succeeded, pending, failed, canceled
+  licensesRevoked Boolean  @default(false) @map("licenses_revoked")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -335,12 +343,12 @@ model Refund {
 
 // Password reset tokens
 model PasswordResetToken {
-  id         String   @id @default(uuid())
-  token      String   @unique
-  customerId String   @map("customer_id")
-  expiresAt  DateTime @map("expires_at")
+  id         String    @id @default(uuid())
+  token      String    @unique
+  customerId String    @map("customer_id")
+  expiresAt  DateTime  @map("expires_at")
   usedAt     DateTime? @map("used_at")
-  createdAt  DateTime @default(now()) @map("created_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -351,43 +359,43 @@ model PasswordResetToken {
 
 // Enterprise quotes for POA pricing
 model Quote {
-  id              String    @id @default(uuid())
-  quoteNumber     String    @unique @map("quote_number")
-  customerId      String?   @map("customer_id")
-  productId       String    @map("product_id")
+  id          String  @id @default(uuid())
+  quoteNumber String  @unique @map("quote_number")
+  customerId  String? @map("customer_id")
+  productId   String  @map("product_id")
 
   // Contact info (for new prospects)
-  contactEmail    String    @map("contact_email")
-  contactName     String?   @map("contact_name")
-  companyName     String?   @map("company_name")
+  contactEmail String  @map("contact_email")
+  contactName  String? @map("contact_name")
+  companyName  String? @map("company_name")
 
   // Quote details
-  seatCount       Int       @map("seat_count")
-  term            LicenseTerm @default(SUBSCRIPTION)
-  termYears       Int       @default(1) @map("term_years")
+  seatCount Int         @map("seat_count")
+  term      LicenseTerm @default(SUBSCRIPTION)
+  termYears Int         @default(1) @map("term_years")
 
   // Pricing
-  basePrice       Int       @map("base_price")      // In cents
-  discount        Decimal?  @db.Decimal(5, 2)       // e.g., 0.25 = 25% off
-  finalPrice      Int       @map("final_price")     // In cents
-  currency        String    @default("usd")
+  basePrice  Int      @map("base_price") // In cents
+  discount   Decimal? @db.Decimal(5, 2) // e.g., 0.25 = 25% off
+  finalPrice Int      @map("final_price") // In cents
+  currency   String   @default("usd")
 
   // Custom requirements
-  customFeatures  String[]  @default([]) @map("custom_features")
-  notes           String?
+  customFeatures String[] @default([]) @map("custom_features")
+  notes          String?
 
   // Status
-  status          QuoteStatus @default(DRAFT)
-  validUntil      DateTime  @map("valid_until")
-  acceptedAt      DateTime? @map("accepted_at")
-  convertedLicenseId String? @unique @map("converted_license_id")
+  status             QuoteStatus @default(DRAFT)
+  validUntil         DateTime    @map("valid_until")
+  acceptedAt         DateTime?   @map("accepted_at")
+  convertedLicenseId String?     @unique @map("converted_license_id")
 
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  customer        Customer? @relation(fields: [customerId], references: [id])
-  product         Product   @relation(fields: [productId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
+  product  Product   @relation(fields: [productId], references: [id])
 
   @@index([customerId])
   @@index([productId])
@@ -403,4 +411,285 @@ enum QuoteStatus {
   REJECTED
   EXPIRED
   CONVERTED
+}
+
+// =============================================================================
+// AI Credit System (for Agencio Predict pay-per-use billing)
+// =============================================================================
+
+enum CreditTransactionType {
+  PURCHASE // Stripe purchase
+  USAGE // AI token consumption
+  REFUND // Admin refund
+  ADJUSTMENT // Manual adjustment by admin
+  AUTO_REFILL // Automatic top-up
+  TRANSFER // Org-to-member transfer (future)
+}
+
+enum CreditTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+// Per-customer credit balance (linked to Predict user via predictUserId)
+model CreditBalance {
+  id         String @id @default(uuid())
+  customerId String @unique @map("customer_id")
+
+  // Link to Predict user (set when Predict provisions credits)
+  predictUserId String? @unique @map("predict_user_id")
+  predictOrgId  String? @map("predict_org_id")
+
+  // Balance in cents (1 credit = 1 cent for simplicity)
+  availableCents         BigInt @default(0) @map("available_cents")
+  reservedCents          BigInt @default(0) @map("reserved_cents") // In-flight LLM calls
+  lifetimePurchasedCents BigInt @default(0) @map("lifetime_purchased_cents")
+  lifetimeUsedCents      BigInt @default(0) @map("lifetime_used_cents")
+
+  // Auto-refill configuration
+  autoRefillEnabled        Boolean   @default(false) @map("auto_refill_enabled")
+  autoRefillPackageId      String?   @map("auto_refill_package_id")
+  autoRefillThresholdCents Int?      @map("auto_refill_threshold_cents")
+  autoRefillMaxCount       Int       @default(3) @map("auto_refill_max_count")
+  autoRefillCurrentCount   Int       @default(0) @map("auto_refill_current_count")
+  autoRefillResetAt        DateTime? @map("auto_refill_reset_at") // When re-auth happened
+
+  // Low balance alert
+  lowBalanceAlertCents  Int?      @map("low_balance_alert_cents")
+  lastLowBalanceAlertAt DateTime? @map("last_low_balance_alert_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  customer          Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  transactions      CreditTransaction[]
+  autoRefillPackage CreditPackage?      @relation(fields: [autoRefillPackageId], references: [id])
+
+  @@index([predictUserId])
+  @@index([predictOrgId])
+  @@map("credit_balances")
+}
+
+// Credit transaction ledger (immutable audit log)
+model CreditTransaction {
+  id              String @id @default(uuid())
+  creditBalanceId String @map("credit_balance_id")
+
+  type   CreditTransactionType
+  status CreditTransactionStatus @default(COMPLETED)
+
+  // Amount (positive for credits in, negative for usage)
+  amountCents       Int    @map("amount_cents")
+  balanceAfterCents BigInt @map("balance_after_cents")
+
+  // For PURCHASE transactions
+  stripePaymentIntentId String? @map("stripe_payment_intent_id")
+  packageId             String? @map("package_id")
+
+  // For USAGE transactions (from Predict)
+  predictCallId    String? @map("predict_call_id") // Idempotency
+  model            String? // claude-sonnet-4, gpt-4o, etc.
+  promptTokens     Int?    @map("prompt_tokens")
+  completionTokens Int?    @map("completion_tokens")
+  endpoint         String? // Which API endpoint consumed tokens
+
+  // For AUTO_REFILL
+  refillNumber Int? @map("refill_number") // 1, 2, 3...
+
+  // Audit
+  description String?
+  metadata    Json?
+  createdBy   String? @map("created_by") // Admin ID for adjustments
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  creditBalance CreditBalance  @relation(fields: [creditBalanceId], references: [id], onDelete: Cascade)
+  package       CreditPackage? @relation(fields: [packageId], references: [id])
+
+  @@unique([predictCallId]) // Idempotency for usage deductions
+  @@index([creditBalanceId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([stripePaymentIntentId])
+  @@map("credit_transactions")
+}
+
+// Credit packages available for purchase (admin-managed)
+model CreditPackage {
+  id String @id @default(uuid())
+
+  name        String // "Starter", "Standard", "Pro"
+  description String?
+
+  // Pricing (minimum $5 = 500 cents)
+  priceCents  Int @map("price_cents")
+  creditCents Int @map("credit_cents") // How many credits you get
+  bonusCents  Int @default(0) @map("bonus_cents") // Bonus credits
+
+  // Stripe
+  stripeProductId String? @unique @map("stripe_product_id")
+  stripePriceId   String? @unique @map("stripe_price_id")
+
+  // Display
+  isPopular Boolean @default(false) @map("is_popular")
+  sortOrder Int     @default(0) @map("sort_order")
+  isActive  Boolean @default(true) @map("is_active")
+
+  // Audit
+  createdBy String  @map("created_by")
+  updatedBy String? @map("updated_by")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  transactions       CreditTransaction[]
+  autoRefillBalances CreditBalance[]
+
+  @@map("credit_packages")
+}
+
+// AI model pricing (admin-managed, used by Predict for cost calculation)
+model AiModelPricing {
+  id String @id @default(uuid())
+
+  model    String @unique // claude-sonnet-4, gpt-4o, etc.
+  provider String // anthropic, openai
+
+  // Cost per 1M tokens in cents
+  inputCostPer1MCents  Int @map("input_cost_per_1m_cents")
+  outputCostPer1MCents Int @map("output_cost_per_1m_cents")
+
+  // Markup for platform margin
+  markupPercent Decimal @default(0) @map("markup_percent") @db.Decimal(5, 2)
+
+  // Display
+  displayName String? @map("display_name")
+  isActive    Boolean @default(true) @map("is_active")
+
+  // Audit
+  createdBy String  @map("created_by")
+  updatedBy String? @map("updated_by")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("ai_model_pricing")
+}
+
+// Global credit system settings (singleton)
+model CreditSettings {
+  id String @id @default("singleton")
+
+  // Minimum purchase
+  minPurchaseCents Int @default(500) @map("min_purchase_cents") // $5
+
+  // Auto-refill limits
+  maxAutoRefillCount Int @default(5) @map("max_auto_refill_count")
+
+  // Default org limits (can be overridden per-org in Predict)
+  defaultDailyLimitCents Int @default(1000) @map("default_daily_limit_cents") // $10
+
+  // Low balance warning threshold
+  defaultLowBalanceAlertCents Int @default(200) @map("default_low_balance_alert_cents") // $2
+
+  // Grace period before suspending on zero balance
+  zeroBalanceGraceMinutes Int @default(60) @map("zero_balance_grace_minutes")
+
+  // Audit
+  updatedBy String?  @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("credit_settings")
+}
+
+// =============================================================================
+// Deployment Validation & Remote Kill (Anti-Theft)
+// =============================================================================
+
+enum DeploymentStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+  KILL
+}
+
+// Registered deployments of Agencio products
+model Deployment {
+  id          String           @id // Set by the deployment itself
+  productId   String?          @map("product_id")
+  customerId  String?          @map("customer_id")
+  licenseId   String?          @map("license_id")
+
+  // Deployment details
+  environment String           @default("production") // production, staging, development
+  machineHash String?          @map("machine_hash")
+  version     String?
+  status      DeploymentStatus @default(ACTIVE)
+
+  // Secret for signature verification (HMAC-SHA256)
+  secret      String?
+
+  // Kill functionality
+  killReason  String?          @map("kill_reason")
+  killMessage String?          @map("kill_message")
+  killedAt    DateTime?        @map("killed_at")
+
+  // Tracking
+  lastSeenAt  DateTime?        @map("last_seen_at")
+  metrics     Json?            // CPU, memory, request count, etc.
+  metadata    Json?
+
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  product     Product?         @relation(fields: [productId], references: [id])
+  customer    Customer?        @relation(fields: [customerId], references: [id])
+  license     License?         @relation(fields: [licenseId], references: [id])
+  commands    DeploymentCommand[]
+
+  @@index([productId])
+  @@index([customerId])
+  @@index([status])
+  @@index([lastSeenAt])
+  @@map("deployments")
+}
+
+enum DeploymentCommandType {
+  RESTART
+  UPDATE
+  KILL
+  CONFIG_UPDATE
+  CLEAR_CACHE
+}
+
+enum DeploymentCommandStatus {
+  PENDING
+  DELIVERED
+  EXECUTED
+  FAILED
+}
+
+// Commands queued for deployments (fetched on heartbeat)
+model DeploymentCommand {
+  id           String                  @id @default(uuid())
+  deploymentId String                  @map("deployment_id")
+
+  type         DeploymentCommandType
+  status       DeploymentCommandStatus @default(PENDING)
+  payload      Json?
+
+  // Tracking
+  createdAt    DateTime @default(now()) @map("created_at")
+  deliveredAt  DateTime? @map("delivered_at")
+  executedAt   DateTime? @map("executed_at")
+  error        String?
+
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@index([status])
+  @@map("deployment_commands")
 }
