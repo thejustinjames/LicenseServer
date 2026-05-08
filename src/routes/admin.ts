@@ -11,6 +11,7 @@ import * as customerService from '../services/customer.service.js';
 import * as paymentService from '../services/payment.service.js';
 import * as storageService from '../services/storage.service.js';
 import * as seatService from '../services/seat.service.js';
+import * as entitlementService from '../services/entitlement.service.js';
 import * as quoteService from '../services/quote.service.js';
 import * as desktopService from '../services/desktop.service.js';
 import * as crlService from '../services/crl.service.js';
@@ -452,6 +453,84 @@ const bulkAssignSeatsSchema = z.object({
     name: z.string().optional(),
   })).min(1).max(100),
   sendInvites: z.boolean().optional().default(true),
+});
+
+// =============================================================================
+// Enterprise seat packs (Phase 1: enterprise-enrollment plan)
+// =============================================================================
+
+const grantPackSchema = z.object({
+  pack_size: z.union([z.literal(5), z.literal(10)]),
+  purchase_order_ref: z.string().max(255).optional(),
+  expires_at: z.string().datetime().optional(),
+  notes: z.string().max(1000).optional(),
+});
+
+// Grant a seat pack (5 or 10 seats) to a license.
+router.post('/licenses/:id/packs', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = grantPackSchema.parse(req.body);
+    const totals = await entitlementService.grantPack({
+      licenseId: req.params.id,
+      packSize: data.pack_size,
+      grantedBy: req.user?.id,
+      purchaseOrderRef: data.purchase_order_ref,
+      expiresAt: data.expires_at ? new Date(data.expires_at) : undefined,
+      notes: data.notes,
+    });
+    res.status(201).json(totals);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid request', details: error.errors });
+      return;
+    }
+    logger.error('grant pack error:', error);
+    const msg = error instanceof Error ? error.message : 'Unknown';
+    res.status(400).json({ error: msg });
+  }
+});
+
+// List all seat packs for a license (audit / admin view).
+router.get('/licenses/:id/packs', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const packs = await prisma.licenseSeatPack.findMany({
+      where: { licenseId: req.params.id },
+      orderBy: { grantedAt: 'desc' },
+    });
+    const totals = await entitlementService.computeSeatTotal(req.params.id);
+    res.json({ packs, totals });
+  } catch (error) {
+    logger.error('list packs error:', error);
+    res.status(500).json({ error: 'Failed to list seat packs' });
+  }
+});
+
+// Revoke a previously granted pack.
+router.post('/licenses/:id/packs/:packId/revoke', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : undefined;
+    const totals = await entitlementService.revokePack(req.params.packId, reason);
+    res.json(totals);
+  } catch (error) {
+    logger.error('revoke pack error:', error);
+    const msg = error instanceof Error ? error.message : 'Unknown';
+    res.status(400).json({ error: msg });
+  }
+});
+
+// Get the current entitlement JWT for a license (for Cortex to fetch / debug).
+// In production Cortex pulls this via /api/v1/tenants/<licenseKey>/entitlement
+// using the license key as the bearer auth — this admin route is for inspection.
+router.get('/licenses/:id/entitlement', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const token = await entitlementService.mintEntitlementJwt(req.params.id);
+    const claims = entitlementService.verifyEntitlementJwt(token);
+    res.json({ entitlement_jwt: token, claims });
+  } catch (error) {
+    logger.error('mint entitlement error:', error);
+    const msg = error instanceof Error ? error.message : 'Unknown';
+    res.status(400).json({ error: msg });
+  }
 });
 
 // Get seat assignments for a license

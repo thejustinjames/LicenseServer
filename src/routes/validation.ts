@@ -4,6 +4,8 @@ import { validationRateLimit } from '../middleware/rateLimit.js';
 import * as licenseService from '../services/license.service.js';
 import * as agentService from '../services/agent.service.js';
 import * as crlService from '../services/crl.service.js';
+import * as entitlementService from '../services/entitlement.service.js';
+import { prisma } from '../config/database.js';
 import { isMtlsCaEnabled } from '../services/ca.service.js';
 import { getPublicKey } from '../utils/crypto.js';
 import { logger } from '../services/logger.service.js';
@@ -202,6 +204,42 @@ router.get('/agents/crl', async (_req: Request, res: Response) => {
   } catch (error) {
     logger.error('CRL build error:', error);
     res.status(500).json({ error: 'CRL build failed' });
+  }
+});
+
+// Tenant entitlement fetch (Phase 1 — enterprise-enrollment plan).
+//
+// A customer's Cortex deployment hits this daily to refresh its local
+// `tenant_entitlement` row. Auth = the License key as bearer token. Returns
+// the signed JWT containing seat-pack composition + valid-until. The JWT
+// itself is signed with our JWT_SECRET; Cortex verifies before storing.
+router.get('/tenants/:licenseKey/entitlement', async (req: Request, res: Response) => {
+  try {
+    const auth = req.headers['authorization'];
+    if (!auth || !auth.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Authorization: Bearer <license_key> required' });
+      return;
+    }
+    const bearerKey = auth.slice('Bearer '.length).trim();
+    const pathKey = req.params.licenseKey;
+
+    if (bearerKey !== pathKey) {
+      // Reject mismatched license-key in path vs bearer to avoid token reuse.
+      res.status(403).json({ error: 'license_key in path must match bearer token' });
+      return;
+    }
+
+    const license = await prisma.license.findUnique({ where: { key: bearerKey } });
+    if (!license || license.status === 'REVOKED') {
+      res.status(404).json({ error: 'license not found or revoked' });
+      return;
+    }
+
+    const token = await entitlementService.mintEntitlementJwt(license.id);
+    res.json({ entitlement_jwt: token });
+  } catch (error) {
+    logger.error('entitlement fetch error:', error);
+    res.status(500).json({ error: 'entitlement fetch failed' });
   }
 });
 
