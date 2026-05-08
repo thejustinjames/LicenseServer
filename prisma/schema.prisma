@@ -454,6 +454,10 @@ enum CreditTransactionType {
   ADJUSTMENT // Manual adjustment by admin
   AUTO_REFILL // Automatic top-up
   TRANSFER // Org-to-member transfer (future)
+  RESERVATION // Reserved for in-flight API call
+  RELEASE // Release unused reservation
+  CONSUMPTION // Consume reserved credits
+  BONUS // Bonus credits added
 }
 
 enum CreditTransactionStatus {
@@ -478,14 +482,21 @@ model CreditBalance {
   lifetimePurchasedCents BigInt @default(0) @map("lifetime_purchased_cents")
   lifetimeUsedCents      BigInt @default(0) @map("lifetime_used_cents")
   totalRefunded          BigInt @default(0) @map("total_refunded")
+  totalPurchased         BigInt @default(0) @map("total_purchased")
+  totalConsumed          BigInt @default(0) @map("total_consumed")
+  totalBonus             BigInt @default(0) @map("total_bonus")
 
   // Auto-refill configuration
-  autoRefillEnabled        Boolean   @default(false) @map("auto_refill_enabled")
-  autoRefillPackageId      String?   @map("auto_refill_package_id")
-  autoRefillThresholdCents Int?      @map("auto_refill_threshold_cents")
-  autoRefillMaxCount       Int       @default(3) @map("auto_refill_max_count")
-  autoRefillCurrentCount   Int       @default(0) @map("auto_refill_current_count")
-  autoRefillResetAt        DateTime? @map("auto_refill_reset_at") // When re-auth happened
+  autoRefillEnabled         Boolean   @default(false) @map("auto_refill_enabled")
+  autoRefillPackageId       String?   @map("auto_refill_package_id")
+  autoRefillThresholdCents  Int?      @map("auto_refill_threshold_cents")
+  autoRefillMaxCount        Int       @default(3) @map("auto_refill_max_count")
+  autoRefillCurrentCount    Int       @default(0) @map("auto_refill_current_count")
+  autoRefillResetAt         DateTime? @map("auto_refill_reset_at")
+  autoRefillPaymentMethodId String?   @map("auto_refill_payment_method_id")
+  autoRefillAmountCents     Int?      @map("auto_refill_amount_cents")
+  autoRefillTriggerCents    Int?      @map("auto_refill_trigger_cents")
+  autoRefillLastAuthAt      DateTime? @map("auto_refill_last_auth_at")
 
   // Low balance alert
   lowBalanceAlertCents  Int?      @map("low_balance_alert_cents")
@@ -523,6 +534,8 @@ model CreditTransaction {
 
   // For USAGE transactions (from Predict)
   predictCallId    String? @map("predict_call_id") // Idempotency
+  idempotencyKey   String? @unique @map("idempotency_key")
+  externalCallId   String? @map("external_call_id")
   model            String? // claude-sonnet-4, gpt-4o, etc.
   promptTokens     Int?    @map("prompt_tokens")
   completionTokens Int?    @map("completion_tokens")
@@ -557,9 +570,11 @@ model CreditPackage {
   description String?
 
   // Pricing (minimum $5 = 500 cents)
-  priceCents  Int @map("price_cents")
-  creditCents Int @map("credit_cents") // How many credits you get
-  bonusCents  Int @default(0) @map("bonus_cents") // Bonus credits
+  priceCents        Int    @map("price_cents")
+  creditCents       Int    @map("credit_cents") // How many credits you get
+  creditAmountCents Int    @default(0) @map("credit_amount_cents") // Alias for creditCents
+  bonusCents        Int    @default(0) @map("bonus_cents") // Bonus credits
+  currency          String @default("usd")
 
   // Stripe
   stripeProductId String? @unique @map("stripe_product_id")

@@ -12,6 +12,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { prisma } from '../config/database.js';
+import { DeploymentStatus } from '@prisma/client';
 import { logger } from '../services/logger.service.js';
 import { config } from '../config/index.js';
 
@@ -502,7 +503,7 @@ router.get('/', async (req, res) => {
 
     const deployments = await prisma.deployment.findMany({
       where: {
-        ...(status ? { status: status as string } : {}),
+        ...(status ? { status: status as DeploymentStatus } : {}),
         ...(productId ? { productId: productId as string } : {}),
       },
       include: {
