@@ -251,7 +251,7 @@ export async function releaseReservation(
     await tx.creditBalance.update({
       where: { id: reservation.creditBalanceId },
       data: {
-        reservedCents: Math.max(0, reservation.creditBalance.reservedCents - amountToRelease),
+        reservedCents: BigInt(Math.max(0, Number(reservation.creditBalance.reservedCents) - amountToRelease)),
       },
     });
 
@@ -312,9 +312,8 @@ export async function consumeCredits(
         balanceAfter: balance.availableCents - actualBigInt,
         externalCallId: usage.externalCallId,
         model: usage.model,
-        provider: usage.provider,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
+        promptTokens: usage.inputTokens,
+        completionTokens: usage.outputTokens,
         metadata: { reservationId },
       },
     });
