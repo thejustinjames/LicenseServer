@@ -56,6 +56,7 @@ async function loadSecrets() {
       'COGNITO_CLIENT_SECRET',
       'COGNITO_ADMIN_CLIENT_ID',
       'COGNITO_ADMIN_GROUP',
+      'ADMIN_API_KEY',
       'ADMIN_GROUP_NAME',
       'ADMIN_REQUIRE_MFA',
       'CUSTOMER_AUTH_ENABLED',
