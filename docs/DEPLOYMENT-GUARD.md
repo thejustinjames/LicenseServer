@@ -100,7 +100,7 @@ Validates a deployment on startup.
 
 **Request Headers:**
 - `X-Deployment-Signature`: HMAC-SHA256 of JSON body using deployment secret
-- `X-Deployment-Id`: Deployment identifier
+- `X-Deployment-Id`: Deployment identifier *(optional — falls back to `body.deploymentId` if absent; the header takes precedence when both are present)*
 
 **Request Body:**
 ```json
@@ -110,9 +110,11 @@ Validates a deployment on startup.
   "version": "1.0.0",
   "environment": "production",
   "timestamp": "2026-05-08T...",
-  "productId": "agencio-predict"
+  "productId": "predict-pro"
 }
 ```
+
+`productId` accepts either a product slug (e.g. `predict-pro`) or a CUID. Slugs are resolved via `products.slug` and are the operator-friendly form. If `deploymentId` is missing from both header and body, the route returns `400` with `action: "warn"` rather than throwing.
 
 **Response (signed):**
 ```json
@@ -206,12 +208,14 @@ Register a new authorized deployment.
 ```json
 {
   "deploymentId": "prod-main-001",
-  "productId": "product-uuid",
+  "productId": "predict-pro",
   "customerId": "customer-uuid",
   "licenseId": "license-uuid",
   "environment": "production"
 }
 ```
+
+`productId` accepts a product slug (preferred) or a CUID. Resolution: `products.findFirst({ where: { OR: [{ id: productId }, { slug: productId }] } })`. If neither matches, the route returns `404 Product not found`. `deploymentId` and `productId` are both required — missing either returns a `400` with a clear error.
 
 **Response:**
 ```json
@@ -225,6 +229,16 @@ Register a new authorized deployment.
 ```
 
 **Important:** The `secret` is only returned once. Store it securely as `DEPLOYMENT_KEY` on the target server.
+
+### Predict products in preprod
+
+The three Predict tiers all have `allow_auto_register=true` so dev/staging deployments hitting `/validate` with a fresh deploymentId are auto-registered. Production environments are **never** auto-registered — they must come through this admin route.
+
+| Tier | productId (slug) | productId (CUID) |
+|---|---|---|
+| Predict Basic | `predict-basic` | `8d820db4-47c9-4d9b-8943-7e3402a6e1d0` |
+| Predict Pro | `predict-pro` | `19a48b25-da89-494d-85b0-caeeadd64a1b` |
+| Predict Enterprise | `predict-enterprise` | `ba2f9883-33b5-4ba9-beca-8c5b8a6985f5` |
 
 ---
 
@@ -555,3 +569,103 @@ The AI is instructed to:
 **Agencio APAC Pte Ltd** (Singapore)
 - Email domains: @agencio.cloud, @agencio.sg
 - License server: licensing.agencio.cloud
+
+---
+
+## Provisioning history (preprod, 2026-05-10)
+
+Initial bring-up of the Deployment Guard on preprod ran into several pieces of schema drift that had to be resolved together. This section captures what shipped, in order, so a future operator can reproduce the work on staging/prod or extend it.
+
+### Schema migrations applied
+
+All three live in `prisma/sql/` and follow the manual SQL workflow described in [EKS-DEPLOYMENT.md → Database Migrations](EKS-DEPLOYMENT.md#database-migrations) — there is no `prisma/migrations/` directory in this repo, so `npx prisma migrate deploy` (in the container CMD) is a no-op for them. Each file is idempotent (`IF NOT EXISTS`, `DO $$ EXCEPTION WHEN duplicate_object`) and wrapped in a transaction, so re-running is safe.
+
+| File | Adds | Why |
+|---|---|---|
+| `prisma/sql/2026-05-09-deployments.sql` | `deployments`, `deployment_commands` tables; `DeploymentStatus`, `DeploymentCommandType`, `DeploymentCommandStatus` enums | Core tables for this guard system. Without these, every route in `src/routes/deployments.ts` returned `500 The table "license_server.deployments" does not exist`. |
+| `prisma/sql/2026-05-10-products-slug.sql` | `products.slug` (unique), `products.allow_auto_register` (bool default false) | These columns existed in `schema.prisma` but never in the DB. The `/validate` auto-register path queries `products.slug`; without the column it threw `column "slug" does not exist`. |
+| `prisma/sql/2026-05-10-credits.sql` | `credit_balances`, `credit_transactions`, `credit_packages`, `ai_model_pricing`, `credit_settings` tables; `CreditTransactionType`, `CreditTransactionStatus` enums; 4 FKs | Discovered by `prisma migrate diff` during this session — unrelated to deployment guard, but the credit endpoints in `src/routes/portal.ts` and `src/services/credit.service.ts` were broken in preprod the same way deployment guard was, so fixed in the same pass. |
+
+The three Predict product rows had their slugs populated as a one-off `UPDATE` (not in a migration file). To reproduce on another environment after applying `2026-05-10-products-slug.sql`:
+
+```sql
+UPDATE products SET slug='predict-basic',      allow_auto_register=true WHERE id='<basic-cuid>';
+UPDATE products SET slug='predict-pro',        allow_auto_register=true WHERE id='<pro-cuid>';
+UPDATE products SET slug='predict-enterprise', allow_auto_register=true WHERE id='<enterprise-cuid>';
+```
+
+Look up the per-environment CUIDs with `SELECT id, name FROM products WHERE name LIKE 'Predict%';`.
+
+### Code changes
+
+| File | Change |
+|---|---|
+| `bootstrap.mjs` | `ADMIN_API_KEY` added to the Secrets Manager allow-list. Currently no runtime effect (the `&&` chain in `Dockerfile.eks` CMD discards `process.env` mutations between bootstrap and `node dist/index.js`) but future-proof if the start command is ever switched to `node --import ./bootstrap.mjs dist/index.js`. |
+| `src/routes/deployments.ts` | `/validate` now reads `deploymentId` from header **or** body; `/register` resolves `productId` via slug-or-CUID; `/register` and `/heartbeat` return clean `400` responses on missing `deploymentId` instead of letting Prisma throw on `id: undefined`. |
+| `docs/EKS-DEPLOYMENT.md` | New "Database Migrations" section explaining the manual SQL workflow with apply/verify commands; troubleshooting block rewritten to "Missing Tables"; `ADMIN_API_KEY` added to the secrets table. |
+
+### Secrets / config
+
+| Where | Key | Notes |
+|---|---|---|
+| AWS Secrets Manager `preprod/license-server` | `ADMIN_API_KEY` | Source of truth (32-byte hex). Now one of 33 keys (was 32 before). |
+| K8s `license-server-secret` (preprod) | `ADMIN_API_KEY` | Same value. This is the path that actually surfaces it on the pod via `envFrom`. |
+
+The K8s secret is what `envFrom` consumes at container start; the AWS Secrets Manager copy is the source-of-truth and the assumption is that whatever sync process keeps the rest of the keys aligned will reflect this one too on the next sync.
+
+### Drift audit findings still outstanding
+
+`prisma migrate diff --from-url $DATABASE_URL --to-schema-datamodel prisma/schema.prisma --script` against preprod (run from inside the pod) surfaced these. The two SQL files above closed the feature-breaking gaps; the items below are cosmetic or minor and were left for a follow-up:
+
+| Drift | Severity | Notes |
+|---|---|---|
+| Missing UNIQUE INDEX `customers_cognito_sub_key` | Minor | `customers.cognito_sub` is `@unique` in schema; column exists, index doesn't. One-line `CREATE UNIQUE INDEX` migration. |
+| FK constraints on `deployments`, `deployment_commands`, `license_seat_packs` use shortform `REFERENCES x(y)` rather than named constraints with explicit `ON DELETE/UPDATE` | Cosmetic | Functionally equivalent. Prisma would recreate them on a real migrate. |
+| `deployment_commands.id` has `DEFAULT gen_random_uuid()::text` in DB; schema generates IDs at app layer | Cosmetic | No effect at runtime. |
+| `license_seat_packs.granted_at`/`expires_at`/`revoked_at` are `TIMESTAMP` in DB; schema declares `TIMESTAMP(3)` | Cosmetic | Sub-second precision diff. |
+
+To re-run the audit on any environment:
+
+```bash
+POD=$(kubectl get pods -n preprod -l app=license-server \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n preprod "$POD" -c license-server -- sh -c '
+  npx --yes prisma migrate diff \
+    --from-url "$DATABASE_URL" \
+    --to-schema-datamodel prisma/schema.prisma \
+    --script
+'
+```
+
+### End-to-end smoke test
+
+Replace `<ADMIN_API_KEY>` with the value from `preprod/license-server`.
+
+```bash
+TEST_ID="smoke-$(date +%s)"
+
+curl -s -X POST https://licensing.agencio.cloud/api/deployments/register \
+  -H 'Content-Type: application/json' \
+  -H "x-api-key: <ADMIN_API_KEY>" \
+  -d "{\"deploymentId\":\"$TEST_ID\",\"productId\":\"predict-pro\",\"environment\":\"production\"}"
+# expect: HTTP 200, { success: true, deployment: { id, secret } }
+
+POD=$(kubectl get pods -n preprod -l app=license-server \
+  -o jsonpath='{.items[0].metadata.name}')
+
+# Verify the row landed
+kubectl exec -n preprod "$POD" -c license-server -- node -e "
+  const { PrismaClient } = require('@prisma/client');
+  const p = new PrismaClient();
+  p.deployment.findUnique({ where: { id: '$TEST_ID' } })
+    .then(r => { console.log(r); return p.\$disconnect(); });
+"
+
+# Clean up
+kubectl exec -n preprod "$POD" -c license-server -- node -e "
+  const { PrismaClient } = require('@prisma/client');
+  const p = new PrismaClient();
+  p.deployment.delete({ where: { id: '$TEST_ID' } })
+    .then(() => p.\$disconnect());
+"
+```
