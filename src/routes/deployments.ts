@@ -319,7 +319,16 @@ router.post('/validate', async (req, res) => {
  */
 router.post('/heartbeat', async (req, res) => {
   try {
-    const { deploymentId, metrics } = req.body;
+    const { deploymentId, metrics } = req.body || {};
+
+    if (!deploymentId) {
+      return res.status(400).json({
+        action: 'warn',
+        reason: 'MISSING_DEPLOYMENT_ID',
+        message: 'deploymentId is required in request body',
+        _ts: Date.now(),
+      });
+    }
 
     const deployment = await prisma.deployment.findUnique({
       where: { id: deploymentId },
@@ -457,7 +466,24 @@ router.post('/register', async (req, res) => {
   }
 
   try {
-    const { deploymentId, productId, customerId, licenseId, environment, secret } = req.body;
+    const { deploymentId, productId, customerId, licenseId, environment, secret } = req.body || {};
+
+    if (!deploymentId) {
+      return res.status(400).json({ error: 'deploymentId is required' });
+    }
+    if (!productId) {
+      return res.status(400).json({ error: 'productId is required (CUID or slug)' });
+    }
+
+    // Accept either a product CUID or slug — admins typically know the slug
+    // (e.g. "agencio-predict") rather than the generated id.
+    const product = await prisma.product.findFirst({
+      where: { OR: [{ id: productId }, { slug: productId }] },
+      select: { id: true },
+    });
+    if (!product) {
+      return res.status(404).json({ error: `Product not found: ${productId}` });
+    }
 
     // Generate secret if not provided
     const deploymentSecret = secret || crypto.randomBytes(32).toString('hex');
@@ -465,7 +491,7 @@ router.post('/register', async (req, res) => {
     const deployment = await prisma.deployment.create({
       data: {
         id: deploymentId,
-        productId,
+        productId: product.id,
         customerId,
         licenseId,
         environment: environment || 'production',
