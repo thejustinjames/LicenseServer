@@ -201,6 +201,97 @@ chmod +x deploy.sh
 ./deploy.sh terraform
 ```
 
+## Database Migrations
+
+The License Server does **not** use Prisma's migration system. There is no
+`prisma/migrations/` directory, so the container's
+`npx prisma migrate deploy` (in `Dockerfile.eks`) is a **no-op**. Schema
+changes ship as hand-rolled SQL files in `prisma/sql/` and must be applied
+manually to each environment after a build is rolled out.
+
+### File layout
+
+```
+prisma/
+├── schema.prisma                          # Prisma model definitions
+└── sql/
+    ├── 2026-04-25-components.sql
+    ├── 2026-04-25-customer-cognito.sql
+    ├── 2026-04-27-license-seat-packs.sql
+    └── 2026-05-09-deployments.sql
+```
+
+Files are dated; they are applied in order. Each file should be idempotent
+(use `IF NOT EXISTS` and `DO $$ ... EXCEPTION WHEN duplicate_object`) and
+wrapped in a `BEGIN; ... COMMIT;` transaction.
+
+### Common failure mode
+
+A deploy whose code references a new model (e.g. `prisma.deployment.*`) but
+where the corresponding SQL file in `prisma/sql/` was never applied. Prisma
+will throw at runtime:
+
+```
+The table "license_server.deployments" does not exist in the current database.
+```
+
+The schema model ships with the build, but the table only appears after the
+SQL is run.
+
+### Applying a SQL file to preprod
+
+Run from the bastion. Prisma uses the pod's `DATABASE_URL` (which already
+includes `?schema=license_server`), so the SQL lands in the right schema —
+no extra `SET search_path` required.
+
+```bash
+POD=$(kubectl get pods -n preprod -l app=license-server \
+  -o jsonpath='{.items[0].metadata.name}')
+
+kubectl exec -n preprod "$POD" -c license-server -- \
+  npx --yes prisma db execute \
+    --file prisma/sql/<YYYY-MM-DD-name>.sql \
+    --schema prisma/schema.prisma
+```
+
+`prisma db execute` does not print query output — a successful run prints
+`Script executed successfully.` Verify by querying `information_schema`
+(see below).
+
+### Verifying tables exist after a migration
+
+```bash
+POD=$(kubectl get pods -n preprod -l app=license-server \
+  -o jsonpath='{.items[0].metadata.name}')
+
+kubectl exec -n preprod "$POD" -c license-server -- node -e '
+  const { PrismaClient } = require("@prisma/client");
+  const p = new PrismaClient();
+  (async () => {
+    const rows = await p.$queryRawUnsafe(
+      `SELECT table_name FROM information_schema.tables
+        WHERE table_schema = $$license_server$$
+        ORDER BY table_name`
+    );
+    console.log(rows);
+    await p.$disconnect();
+  })();
+'
+```
+
+### When adding a new schema change
+
+1. Add the model/field to `prisma/schema.prisma`.
+2. Add a new dated SQL file in `prisma/sql/` that creates the corresponding
+   table/column. Make it idempotent and wrap in `BEGIN; ... COMMIT;`.
+3. Commit and push.
+4. Trigger a Jenkins build of `SILO/PreProduction/license-server` so the new
+   `schema.prisma` (and the SQL file) ships into the image.
+5. **Run the SQL file against the target environment** using the command
+   above — this is the step that's easy to forget.
+6. `kubectl rollout restart deploy/license-server -n preprod` to pick up
+   the new image.
+
 ## Configuration Reference
 
 ### Environment Variables (ConfigMap)
@@ -226,6 +317,7 @@ chmod +x deploy.sh
 | `COGNITO_CLIENT_ID` | Cognito App Client ID |
 | `COGNITO_CLIENT_SECRET` | Cognito App Client Secret |
 | `REDIS_HOST` | ElastiCache endpoint |
+| `ADMIN_API_KEY` | Shared secret for admin deployment-guard routes (`x-api-key` header on `/api/deployments/register`, `/:id/kill`, `/watermark/identify`, and the admin list `GET /api/deployments`) |
 
 ### IAM Role Permissions
 
@@ -302,10 +394,15 @@ kubectl scale deployment/license-server -n preprod --replicas=5
 
 1. Verify security groups allow traffic from EKS
 2. Check DATABASE_URL in Secrets Manager
-3. Run Prisma migrations manually if needed:
-   ```bash
-   kubectl exec -it deployment/license-server -n preprod -- npx prisma migrate deploy
-   ```
+
+### Missing Tables ("table X does not exist")
+
+If a route returns 500 and pod logs show
+`The table "license_server.<name>" does not exist in the current database`,
+a SQL file in `prisma/sql/` was never applied to this environment. See
+[Database Migrations](#database-migrations) for the apply command. Note
+that `npx prisma migrate deploy` is a no-op for this repo (there is no
+`prisma/migrations/` directory) — it will not fix this.
 
 ### S3 Access Denied
 

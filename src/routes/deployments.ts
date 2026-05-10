@@ -86,9 +86,11 @@ function verifySignature(payload: string, signature: string, secret: string): bo
  */
 router.post('/validate', async (req, res) => {
   try {
-    const fingerprint = req.body as DeploymentFingerprint;
+    const fingerprint = (req.body || {}) as DeploymentFingerprint;
     const signature = req.headers['x-deployment-signature'] as string;
-    const deploymentId = req.headers['x-deployment-id'] as string;
+    // Header takes precedence; fall back to body so callers that only send
+    // the signed fingerprint (which already contains deploymentId) work too.
+    const deploymentId = (req.headers['x-deployment-id'] as string) || fingerprint.deploymentId;
 
     // Log the validation attempt
     logger.info('Deployment validation request', {
@@ -98,6 +100,15 @@ router.post('/validate', async (req, res) => {
       version: fingerprint.version,
       ip: req.ip,
     });
+
+    if (!deploymentId) {
+      return res.status(400).json({
+        valid: false,
+        message: 'deploymentId is required (x-deployment-id header or request body)',
+        action: 'warn',
+        _ts: Date.now(),
+      } as ValidationResponse);
+    }
 
     // Check if this deployment is registered
     const deployment = await prisma.deployment.findUnique({
