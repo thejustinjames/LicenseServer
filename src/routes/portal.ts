@@ -1089,4 +1089,112 @@ router.get('/credits/check', authenticate, async (req: AuthenticatedRequest, res
   }
 });
 
+// ============================================================================
+// SERVER-TO-SERVER CUSTOMER CREATION
+// ============================================================================
+
+import { config } from '../config/index.js';
+
+const createExternalCustomerSchema = z.object({
+  externalId: z.string().min(1),
+  email: z.string().email(),
+  name: z.string().optional(),
+  source: z.string().default('predict'),
+});
+
+/**
+ * POST /api/portal/customers
+ *
+ * Server-to-server endpoint for creating customers from external systems.
+ * Requires API key authentication.
+ * Idempotent: if customer already exists by externalId, returns existing customer.
+ */
+router.post('/customers', async (req, res: Response) => {
+  try {
+    // API key authentication
+    const apiKey = req.headers['x-api-key'];
+    if (!config.ADMIN_API_KEY || apiKey !== config.ADMIN_API_KEY) {
+      logger.warn('Unauthorized external customer creation attempt', {
+        hasKey: !!apiKey,
+        ip: req.ip,
+      });
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const data = createExternalCustomerSchema.parse(req.body);
+
+    const customer = await customerService.createExternalCustomer({
+      email: data.email,
+      name: data.name,
+      externalId: data.externalId,
+      externalSource: data.source,
+    });
+
+    logger.info('External customer created/retrieved', {
+      customerId: customer.id,
+      externalId: data.externalId,
+      source: data.source,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        id: customer.id,
+        externalId: (customer as { externalId?: string }).externalId || data.externalId,
+        email: customer.email,
+        name: customer.name,
+        stripeCustomerId: customer.stripeCustomerId,
+        createdAt: customer.createdAt,
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ success: false, error: 'Validation error', details: error.errors });
+      return;
+    }
+    logger.error('Create external customer error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create customer' });
+  }
+});
+
+/**
+ * GET /api/portal/customers/:externalId
+ *
+ * Server-to-server endpoint to get customer by external ID.
+ * Requires API key authentication.
+ */
+router.get('/customers/:externalId', async (req, res: Response) => {
+  try {
+    // API key authentication
+    const apiKey = req.headers['x-api-key'];
+    if (!config.ADMIN_API_KEY || apiKey !== config.ADMIN_API_KEY) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const customer = await customerService.getCustomerByExternalId(req.params.externalId);
+
+    if (!customer) {
+      res.status(404).json({ success: false, error: 'Customer not found' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: customer.id,
+        externalId: (customer as { externalId?: string }).externalId,
+        email: customer.email,
+        name: customer.name,
+        stripeCustomerId: customer.stripeCustomerId,
+        createdAt: customer.createdAt,
+      },
+    });
+  } catch (error) {
+    logger.error('Get external customer error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get customer' });
+  }
+});
+
 export default router;

@@ -132,6 +132,9 @@ model Customer {
   cognitoSub          String?   @unique @map("cognito_sub")
   cognitoPool         String?   @map("cognito_pool")
   mfaEnabledAt        DateTime? @map("mfa_enabled_at")
+  // External system linkage (e.g., Predict user ID)
+  externalId          String?   @unique @map("external_id")
+  externalSource      String?   @map("external_source")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 

@@ -21,6 +21,13 @@ export interface CreateCustomerInput {
   isAdmin?: boolean;
 }
 
+export interface CreateExternalCustomerInput {
+  email: string;
+  name?: string;
+  externalId: string;
+  externalSource: string;
+}
+
 export interface UpdateCustomerInput {
   email?: string;
   name?: string;
@@ -72,6 +79,100 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
   }
 
   return omitPassword(customer);
+}
+
+/**
+ * Create a customer from an external system (e.g., Agencio Predict).
+ * External customers don't need a password as they authenticate via their source system.
+ */
+export async function createExternalCustomer(input: CreateExternalCustomerInput): Promise<CustomerWithoutPassword> {
+  // Check if customer already exists by external ID
+  const existingByExternal = await prisma.customer.findUnique({
+    where: { externalId: input.externalId },
+  });
+
+  if (existingByExternal) {
+    // Return existing customer - idempotent
+    return omitPassword(existingByExternal);
+  }
+
+  // Check if customer exists by email
+  const existingByEmail = await prisma.customer.findUnique({
+    where: { email: input.email },
+  });
+
+  if (existingByEmail) {
+    // Link existing customer to external ID
+    const updated = await prisma.customer.update({
+      where: { email: input.email },
+      data: {
+        externalId: input.externalId,
+        externalSource: input.externalSource,
+        name: input.name || existingByEmail.name,
+      },
+    });
+    logger.info('Linked existing customer to external ID', {
+      customerId: updated.id,
+      externalId: input.externalId,
+      source: input.externalSource,
+    });
+    return omitPassword(updated);
+  }
+
+  // Generate a random password (not used for external auth, but required by schema)
+  const randomPassword = crypto.randomBytes(32).toString('hex');
+  const passwordHash = await bcrypt.hash(randomPassword, SALT_ROUNDS);
+
+  // Create Stripe customer
+  let stripeCustomerId: string | undefined;
+  try {
+    const stripeCustomer = await stripe.customers.create({
+      email: input.email,
+      name: input.name,
+      metadata: {
+        externalId: input.externalId,
+        externalSource: input.externalSource,
+      },
+    });
+    stripeCustomerId = stripeCustomer.id;
+  } catch (error) {
+    logger.warn('Failed to create Stripe customer for external customer', {
+      error: error instanceof Error ? error.message : String(error),
+      externalId: input.externalId,
+    });
+  }
+
+  const customer = await prisma.customer.create({
+    data: {
+      email: input.email,
+      passwordHash,
+      name: input.name,
+      isAdmin: false,
+      stripeCustomerId,
+      externalId: input.externalId,
+      externalSource: input.externalSource,
+    },
+  });
+
+  logger.info('Created external customer', {
+    customerId: customer.id,
+    externalId: input.externalId,
+    source: input.externalSource,
+    hasStripe: !!stripeCustomerId,
+  });
+
+  return omitPassword(customer);
+}
+
+/**
+ * Get a customer by their external ID
+ */
+export async function getCustomerByExternalId(externalId: string): Promise<CustomerWithoutPassword | null> {
+  const customer = await prisma.customer.findUnique({
+    where: { externalId },
+  });
+
+  return customer ? omitPassword(customer) : null;
 }
 
 export async function getCustomerById(id: string): Promise<CustomerWithoutPassword | null> {
