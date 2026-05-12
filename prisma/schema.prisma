@@ -293,11 +293,11 @@ model LicenseSeatPack {
   id                 String    @id @default(uuid())
   licenseId          String    @map("license_id")
   packSize           Int       @map("pack_size")            // 5 or 10 only (CHECK in migration)
-  grantedAt          DateTime  @default(now()) @map("granted_at")
+  grantedAt          DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
   grantedBy          String?   @map("granted_by")            // Admin user id who applied the pack
   purchaseOrderRef   String?   @map("purchase_order_ref")    // Stripe charge / contract / PO ref
-  expiresAt          DateTime? @map("expires_at")            // null = perpetual; set for promo packs
-  revokedAt          DateTime? @map("revoked_at")            // null = active; set on refund / chargeback
+  expiresAt          DateTime? @map("expires_at") @db.Timestamptz(6)            // null = perpetual; set for promo packs
+  revokedAt          DateTime? @map("revoked_at") @db.Timestamptz(6)            // null = active; set on refund / chargeback
   revokedReason      String?   @map("revoked_reason")
   notes              String?
 
