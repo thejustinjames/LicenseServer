@@ -27,6 +27,7 @@ import customerAuthRoutes from './routes/customerAuth.js';
 import adminAuthRoutes from './routes/adminAuth.js';
 import authRoutes from './routes/auth.js';
 import deploymentRoutes from './routes/deployments.js';
+import updatesRoutes from './routes/updates.js';
 
 const app = express();
 
@@ -80,6 +81,7 @@ app.use('/api/customer/auth', customerAuthRoutes);
 app.use('/api/v1', validationRoutes);
 app.use('/api/v1/desktop', desktopRoutes);
 app.use('/api/deployments', deploymentRoutes); // Deployment validation & kill
+app.use('/api/updates', updatesRoutes); // K8 Inspector version check & updates
 app.use('/webhooks', webhookRoutes);
 
 // Serve static frontend
