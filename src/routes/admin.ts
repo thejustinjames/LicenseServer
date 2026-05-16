@@ -19,6 +19,7 @@ import { isMtlsCaEnabled } from '../services/ca.service.js';
 import { prisma } from '../config/database.js';
 import { logger } from '../services/logger.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
+import adminReleasesRoutes from './adminReleases.js';
 
 // Configure multer for memory storage (files up to 500MB)
 const upload = multer({
@@ -66,6 +67,9 @@ const router = Router();
 router.use(authenticate);
 router.use(idleTimeout);
 router.use(requireAdmin);
+
+// Mount releases sub-router
+router.use('/releases', adminReleasesRoutes);
 
 // Product schemas
 const createProductSchema = z.object({

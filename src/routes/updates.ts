@@ -1,12 +1,13 @@
 /**
  * Updates API Routes
- * Provides version check and update notifications for K8 Inspector
+ * Provides version check and update notifications for K8 Inspector and other products
  *
  * Copyright (c) 2026 Agencio. All rights reserved.
  */
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { prisma } from '../config/database.js';
 import { validationRateLimit } from '../middleware/rateLimit.js';
 import { logger } from '../services/logger.service.js';
 
@@ -14,27 +15,6 @@ const router = Router();
 
 // Apply rate limiting (same as validation - 60 req/min per IP)
 router.use(validationRateLimit);
-
-// Current K8 Inspector version info - UPDATE THIS WHEN RELEASING NEW VERSIONS
-const CURRENT_RELEASE = {
-  version: '2.0.1',
-  releaseDate: '2026-05-16',
-  releaseNotes: `## K8 Inspector v2.0.1
-
-### Bug Fixes
-- Fixed license validation for LemonSqueezy integration
-- Fixed cluster connection when running inside Kubernetes (in-cluster ServiceAccount fallback)
-- Fixed region display in Setup Wizard review step
-
-### Improvements
-- Improved in-cluster authentication detection
-- Better error messages for cluster connection failures
-- Updated documentation for deployment scenarios
-`,
-  downloadUrl: 'https://agencio.app/downloads',
-  minVersion: '1.0.0', // Minimum supported version for upgrades
-  critical: false, // Set to true for security updates
-};
 
 // Schema for version check request
 const versionCheckSchema = z.object({
@@ -63,16 +43,52 @@ function compareVersions(v1: string, v2: string): number {
 }
 
 /**
+ * Get the active release for a product
+ */
+async function getActiveRelease(productSlug: string) {
+  return prisma.release.findFirst({
+    where: {
+      productSlug,
+      isActive: true,
+    },
+    orderBy: { releaseDate: 'desc' },
+  });
+}
+
+/**
  * GET /api/updates/check
  * Quick version check - returns latest version info
+ * Query param: product (default: k8inspector)
  */
-router.get('/check', (_req: Request, res: Response) => {
-  res.json({
-    latestVersion: CURRENT_RELEASE.version,
-    releaseDate: CURRENT_RELEASE.releaseDate,
-    downloadUrl: CURRENT_RELEASE.downloadUrl,
-    critical: CURRENT_RELEASE.critical,
-  });
+router.get('/check', async (req: Request, res: Response) => {
+  try {
+    const productSlug = (req.query.product as string) || 'k8inspector';
+    const release = await getActiveRelease(productSlug);
+
+    if (!release) {
+      res.json({
+        latestVersion: null,
+        releaseDate: null,
+        downloadUrl: null,
+        critical: false,
+        message: 'No releases found for this product',
+      });
+      return;
+    }
+
+    res.json({
+      latestVersion: release.version,
+      releaseDate: release.releaseDate.toISOString().split('T')[0],
+      downloadUrl: release.downloadUrl,
+      critical: release.isCritical,
+    });
+  } catch (error) {
+    logger.error('Version check error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Version check failed',
+    });
+  }
 });
 
 /**
@@ -84,13 +100,33 @@ router.post('/check', async (req: Request, res: Response) => {
     const data = versionCheckSchema.parse(req.body);
     const { currentVersion, licenseKey, deploymentMethod, platform } = data;
 
-    const updateAvailable = compareVersions(CURRENT_RELEASE.version, currentVersion) > 0;
-    const isOutdated = compareVersions(currentVersion, CURRENT_RELEASE.minVersion) < 0;
+    // Get product slug from query or default to k8inspector
+    const productSlug = (req.query.product as string) || 'k8inspector';
+    const release = await getActiveRelease(productSlug);
+
+    if (!release) {
+      res.json({
+        success: true,
+        currentVersion,
+        latestVersion: currentVersion,
+        updateAvailable: false,
+        isOutdated: false,
+        critical: false,
+        message: 'No releases found for this product',
+      });
+      return;
+    }
+
+    const updateAvailable = compareVersions(release.version, currentVersion) > 0;
+    const isOutdated = release.minVersion
+      ? compareVersions(currentVersion, release.minVersion) < 0
+      : false;
 
     // Log the check for analytics (no PII)
     logger.info('Version check', {
+      productSlug,
       currentVersion,
-      latestVersion: CURRENT_RELEASE.version,
+      latestVersion: release.version,
       updateAvailable,
       deploymentMethod,
       platform,
@@ -100,14 +136,14 @@ router.post('/check', async (req: Request, res: Response) => {
     res.json({
       success: true,
       currentVersion,
-      latestVersion: CURRENT_RELEASE.version,
+      latestVersion: release.version,
       updateAvailable,
       isOutdated,
-      critical: CURRENT_RELEASE.critical,
-      releaseDate: CURRENT_RELEASE.releaseDate,
-      releaseNotes: updateAvailable ? CURRENT_RELEASE.releaseNotes : null,
-      downloadUrl: CURRENT_RELEASE.downloadUrl,
-      upgradeInstructions: updateAvailable ? getUpgradeInstructions(deploymentMethod) : null,
+      critical: release.isCritical,
+      releaseDate: release.releaseDate.toISOString().split('T')[0],
+      releaseNotes: updateAvailable ? release.releaseNotes : null,
+      downloadUrl: release.downloadUrl,
+      upgradeInstructions: updateAvailable ? getUpgradeInstructions(deploymentMethod, release.version) : null,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -129,34 +165,105 @@ router.post('/check', async (req: Request, res: Response) => {
 /**
  * GET /api/updates/latest
  * Get full release info
+ * Query param: product (default: k8inspector)
  */
-router.get('/latest', (_req: Request, res: Response) => {
-  res.json({
-    version: CURRENT_RELEASE.version,
-    releaseDate: CURRENT_RELEASE.releaseDate,
-    releaseNotes: CURRENT_RELEASE.releaseNotes,
-    downloadUrl: CURRENT_RELEASE.downloadUrl,
-    critical: CURRENT_RELEASE.critical,
-    minVersion: CURRENT_RELEASE.minVersion,
-  });
+router.get('/latest', async (req: Request, res: Response) => {
+  try {
+    const productSlug = (req.query.product as string) || 'k8inspector';
+    const release = await getActiveRelease(productSlug);
+
+    if (!release) {
+      res.status(404).json({
+        error: 'No releases found for this product',
+      });
+      return;
+    }
+
+    res.json({
+      version: release.version,
+      releaseDate: release.releaseDate.toISOString().split('T')[0],
+      releaseNotes: release.releaseNotes,
+      downloadUrl: release.downloadUrl,
+      critical: release.isCritical,
+      minVersion: release.minVersion,
+    });
+  } catch (error) {
+    logger.error('Get latest release error:', error);
+    res.status(500).json({ error: 'Failed to get release info' });
+  }
 });
 
 /**
  * GET /api/updates/changelog
  * Get release notes/changelog
+ * Query param: product (default: k8inspector)
  */
-router.get('/changelog', (_req: Request, res: Response) => {
-  res.json({
-    version: CURRENT_RELEASE.version,
-    releaseNotes: CURRENT_RELEASE.releaseNotes,
-    releaseDate: CURRENT_RELEASE.releaseDate,
-  });
+router.get('/changelog', async (req: Request, res: Response) => {
+  try {
+    const productSlug = (req.query.product as string) || 'k8inspector';
+    const release = await getActiveRelease(productSlug);
+
+    if (!release) {
+      res.status(404).json({
+        error: 'No releases found for this product',
+      });
+      return;
+    }
+
+    res.json({
+      version: release.version,
+      releaseNotes: release.releaseNotes,
+      releaseDate: release.releaseDate.toISOString().split('T')[0],
+    });
+  } catch (error) {
+    logger.error('Get changelog error:', error);
+    res.status(500).json({ error: 'Failed to get changelog' });
+  }
+});
+
+/**
+ * GET /api/updates/history
+ * Get release history for a product
+ * Query param: product (default: k8inspector), limit (default: 10)
+ */
+router.get('/history', async (req: Request, res: Response) => {
+  try {
+    const productSlug = (req.query.product as string) || 'k8inspector';
+    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+
+    const releases = await prisma.release.findMany({
+      where: { productSlug },
+      orderBy: { releaseDate: 'desc' },
+      take: limit,
+      select: {
+        version: true,
+        releaseDate: true,
+        releaseNotes: true,
+        isCritical: true,
+        isActive: true,
+      },
+    });
+
+    res.json({
+      product: productSlug,
+      releases: releases.map(r => ({
+        version: r.version,
+        releaseDate: r.releaseDate.toISOString().split('T')[0],
+        releaseNotes: r.releaseNotes,
+        critical: r.isCritical,
+        current: r.isActive,
+      })),
+    });
+  } catch (error) {
+    logger.error('Get release history error:', error);
+    res.status(500).json({ error: 'Failed to get release history' });
+  }
 });
 
 /**
  * Get upgrade instructions based on deployment method
  */
-function getUpgradeInstructions(deploymentMethod?: string): object {
+function getUpgradeInstructions(deploymentMethod?: string, version?: string): object {
   const instructions: Record<string, object> = {
     docker: {
       title: 'Docker Upgrade',
@@ -175,7 +282,7 @@ function getUpgradeInstructions(deploymentMethod?: string): object {
         'Apply the changes: kubectl apply -f k8inspector-deployment.yaml',
         'Monitor rollout: kubectl rollout status deployment/k8inspector',
       ],
-      command: `kubectl set image deployment/k8inspector k8inspector=k8inspector:${CURRENT_RELEASE.version}`,
+      command: `kubectl set image deployment/k8inspector k8inspector=k8inspector:${version || 'latest'}`,
     },
     helm: {
       title: 'Helm Upgrade',
@@ -183,7 +290,7 @@ function getUpgradeInstructions(deploymentMethod?: string): object {
         'Update your values.yaml with the new image tag',
         'Run: helm upgrade k8inspector ./k8inspector-chart',
       ],
-      command: `helm upgrade k8inspector ./k8inspector-chart --set image.tag=${CURRENT_RELEASE.version}`,
+      command: `helm upgrade k8inspector ./k8inspector-chart --set image.tag=${version || 'latest'}`,
     },
     standalone: {
       title: 'Standalone Upgrade',

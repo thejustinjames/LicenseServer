@@ -658,6 +658,43 @@ model CreditSettings {
 }
 
 // =============================================================================
+// Software Releases (Update Notifications)
+// =============================================================================
+
+// Software releases for update notifications (K8 Inspector, SILO, etc.)
+model Release {
+  id          String   @id @default(uuid())
+
+  // Product identifier (e.g., "k8inspector", "silo", "agencio-predict")
+  productSlug String   @map("product_slug")
+
+  // Version info
+  version     String   // e.g., "2.0.1"
+  releaseDate DateTime @map("release_date")
+
+  // Release details
+  releaseNotes String?  @map("release_notes") @db.Text
+  downloadUrl  String?  @map("download_url")
+
+  // Update requirements
+  minVersion   String?  @map("min_version") // Minimum version for upgrades
+  isCritical   Boolean  @default(false) @map("is_critical") // Security update
+
+  // Status
+  isActive     Boolean  @default(true) @map("is_active") // Current release for this product
+
+  // Audit
+  createdBy    String?  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([productSlug, version])
+  @@index([productSlug])
+  @@index([isActive])
+  @@map("releases")
+}
+
+// =============================================================================
 // Deployment Validation & Remote Kill (Anti-Theft)
 // =============================================================================
 

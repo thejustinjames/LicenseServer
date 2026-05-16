@@ -8,6 +8,7 @@ var products = [];
 var customers = [];
 var categories = [];
 var coupons = [];
+var releases = [];
 var productSearchTimeout = null;
 
 // Initialize
@@ -143,6 +144,15 @@ function bindEvents() {
       case 'activate-promo':
         activatePromoCode(id);
         break;
+      case 'edit-release':
+        editRelease(id);
+        break;
+      case 'delete-release':
+        deleteRelease(id);
+        break;
+      case 'activate-release':
+        activateRelease(id);
+        break;
     }
   });
 
@@ -186,6 +196,21 @@ function bindEvents() {
   document.getElementById('promoCode').addEventListener('input', function() {
     this.value = this.value.toUpperCase();
   });
+
+  // Release modal
+  document.getElementById('addReleaseBtn').addEventListener('click', function() {
+    openReleaseModal();
+  });
+  document.getElementById('closeReleaseModal').addEventListener('click', closeReleaseModal);
+  document.getElementById('cancelReleaseBtn').addEventListener('click', closeReleaseModal);
+  document.getElementById('releaseForm').addEventListener('submit', handleReleaseSubmit);
+  document.getElementById('releaseModal').addEventListener('click', function(e) {
+    if (e.target === this) closeReleaseModal();
+  });
+
+  // Release filters
+  document.getElementById('releaseProductFilter').addEventListener('change', loadReleases);
+  document.getElementById('releaseActiveOnly').addEventListener('change', loadReleases);
 
   // Tab switching
   var tabBtns = document.querySelectorAll('.tab-btn');
@@ -307,6 +332,9 @@ function loadSectionData(section) {
     case 'coupons':
       loadCoupons();
       loadPromoCodes();
+      break;
+    case 'releases':
+      loadReleases();
       break;
   }
 }
@@ -1367,5 +1395,151 @@ function deleteBundle(key) {
     })
     .catch(function(error) {
       alert('Failed to delete bundle: ' + error.message);
+    });
+}
+
+// ============================================================================
+// RELEASES (Software Update Notifications)
+// ============================================================================
+
+function loadReleases() {
+  var productSlug = document.getElementById('releaseProductFilter').value;
+  var activeOnly = document.getElementById('releaseActiveOnly').checked;
+
+  var url = '/api/admin/releases';
+  var params = [];
+  if (productSlug) params.push('productSlug=' + encodeURIComponent(productSlug));
+  if (activeOnly) params.push('activeOnly=true');
+  if (params.length > 0) url += '?' + params.join('&');
+
+  api(url)
+    .then(function(data) {
+      releases = data;
+      var tbody = document.getElementById('releasesTable');
+
+      if (data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b;">No releases found. Create one to enable update notifications.</td></tr>';
+        return;
+      }
+
+      var html = '';
+      for (var i = 0; i < data.length; i++) {
+        var rel = data[i];
+        var statusClass = rel.isActive ? 'status-active' : 'status-suspended';
+        var statusText = rel.isActive ? 'Active' : 'Inactive';
+        var criticalBadge = rel.isCritical ? '<span class="status-badge status-expired" style="margin-left: 0.5rem;">Critical</span>' : '';
+
+        html += '<tr>';
+        html += '<td><span class="feature-tag">' + escapeHtml(rel.productSlug) + '</span></td>';
+        html += '<td><strong>' + escapeHtml(rel.version) + '</strong>' + criticalBadge + '</td>';
+        html += '<td>' + formatDate(rel.releaseDate) + '</td>';
+        html += '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>';
+        html += '<td>' + (rel.isCritical ? 'Yes' : 'No') + '</td>';
+        html += '<td class="actions">';
+        html += '<button class="btn btn-secondary btn-sm action-btn" data-action="edit-release" data-id="' + escapeHtml(rel.id) + '">Edit</button>';
+        if (!rel.isActive) {
+          html += '<button class="btn btn-success btn-sm action-btn" data-action="activate-release" data-id="' + escapeHtml(rel.id) + '">Activate</button>';
+        }
+        html += '<button class="btn btn-danger btn-sm action-btn" data-action="delete-release" data-id="' + escapeHtml(rel.id) + '">Delete</button>';
+        html += '</td>';
+        html += '</tr>';
+      }
+      tbody.innerHTML = html;
+    })
+    .catch(function(error) {
+      console.error('Failed to load releases:', error);
+      document.getElementById('releasesTable').innerHTML = '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load releases.</td></tr>';
+    });
+}
+
+function openReleaseModal(release) {
+  document.getElementById('releaseModal').classList.add('active');
+  document.getElementById('releaseForm').reset();
+
+  // Set default date to today
+  var today = new Date().toISOString().split('T')[0];
+  document.getElementById('releaseDate').value = today;
+  document.getElementById('releaseIsActive').checked = true;
+
+  if (release) {
+    document.getElementById('releaseModalTitle').textContent = 'Edit Release';
+    document.getElementById('releaseId').value = release.id;
+    document.getElementById('releaseProductSlug').value = release.productSlug;
+    document.getElementById('releaseVersion').value = release.version;
+    document.getElementById('releaseDate').value = release.releaseDate.split('T')[0];
+    document.getElementById('releaseMinVersion').value = release.minVersion || '';
+    document.getElementById('releaseDownloadUrl').value = release.downloadUrl || '';
+    document.getElementById('releaseNotes').value = release.releaseNotes || '';
+    document.getElementById('releaseIsCritical').checked = release.isCritical;
+    document.getElementById('releaseIsActive').checked = release.isActive;
+  } else {
+    document.getElementById('releaseModalTitle').textContent = 'New Release';
+    document.getElementById('releaseId').value = '';
+  }
+}
+
+function closeReleaseModal() {
+  document.getElementById('releaseModal').classList.remove('active');
+}
+
+function editRelease(id) {
+  var release = releases.find(function(r) { return r.id === id; });
+  if (release) {
+    openReleaseModal(release);
+  }
+}
+
+function handleReleaseSubmit(e) {
+  e.preventDefault();
+
+  var id = document.getElementById('releaseId').value;
+  var releaseDate = document.getElementById('releaseDate').value;
+
+  var data = {
+    productSlug: document.getElementById('releaseProductSlug').value,
+    version: document.getElementById('releaseVersion').value,
+    releaseDate: new Date(releaseDate + 'T12:00:00Z').toISOString(),
+    minVersion: document.getElementById('releaseMinVersion').value || undefined,
+    downloadUrl: document.getElementById('releaseDownloadUrl').value || undefined,
+    releaseNotes: document.getElementById('releaseNotes').value || undefined,
+    isCritical: document.getElementById('releaseIsCritical').checked,
+    isActive: document.getElementById('releaseIsActive').checked,
+  };
+
+  var method = id ? 'PUT' : 'POST';
+  var url = id ? '/api/admin/releases/' + id : '/api/admin/releases';
+
+  api(url, { method: method, body: JSON.stringify(data) })
+    .then(function() {
+      closeReleaseModal();
+      loadReleases();
+      alert(id ? 'Release updated successfully!' : 'Release created successfully!');
+    })
+    .catch(function(error) {
+      alert('Failed to save release: ' + error.message);
+    });
+}
+
+function deleteRelease(id) {
+  if (!confirm('Delete this release? This cannot be undone.')) return;
+
+  api('/api/admin/releases/' + id, { method: 'DELETE' })
+    .then(function() {
+      loadReleases();
+    })
+    .catch(function(error) {
+      alert('Failed to delete release: ' + error.message);
+    });
+}
+
+function activateRelease(id) {
+  if (!confirm('Set this as the active release? The current active release for this product will be deactivated.')) return;
+
+  api('/api/admin/releases/' + id + '/activate', { method: 'POST' })
+    .then(function() {
+      loadReleases();
+    })
+    .catch(function(error) {
+      alert('Failed to activate release: ' + error.message);
     });
 }

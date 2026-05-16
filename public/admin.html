@@ -89,6 +89,19 @@
           </svg>
           SILO Tiers
         </a>
+        <a href="#" class="sidebar-link" data-section="releases">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v4"></path>
+            <path d="M12 18v4"></path>
+            <path d="M4.93 4.93l2.83 2.83"></path>
+            <path d="M16.24 16.24l2.83 2.83"></path>
+            <path d="M2 12h4"></path>
+            <path d="M18 12h4"></path>
+            <path d="M4.93 19.07l2.83-2.83"></path>
+            <path d="M16.24 7.76l2.83-2.83"></path>
+          </svg>
+          Releases
+        </a>
       </nav>
     </aside>
 
@@ -577,6 +590,47 @@ enum EnterpriseFeature {
 }</pre>
         </div>
       </section>
+
+      <!-- Releases Section -->
+      <section id="releases" class="admin-section">
+        <div class="section-header">
+          <h1>Software Releases</h1>
+          <button class="btn btn-primary" id="addReleaseBtn">+ New Release</button>
+        </div>
+
+        <div class="filter-bar">
+          <div class="category-filter">
+            <select id="releaseProductFilter">
+              <option value="">All Products</option>
+              <option value="k8inspector">K8 Inspector</option>
+              <option value="silo">SILO</option>
+              <option value="agencio-predict">Agencio Predict</option>
+            </select>
+          </div>
+          <label class="checkbox-label" style="margin-left: 1rem;">
+            <input type="checkbox" id="releaseActiveOnly">
+            Active only
+          </label>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Version</th>
+                <th>Release Date</th>
+                <th>Status</th>
+                <th>Critical</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="releasesTable">
+              <tr><td colspan="6" class="loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -989,6 +1043,79 @@ enum EnterpriseFeature {
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" id="cancelPromoCodeBtn">Cancel</button>
           <button type="submit" class="btn btn-primary">Create Promo Code</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Release Modal -->
+  <div class="modal" id="releaseModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="releaseModalTitle">New Release</h2>
+        <button class="modal-close" id="closeReleaseModal">&times;</button>
+      </div>
+      <form id="releaseForm">
+        <input type="hidden" id="releaseId">
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="releaseProductSlug">Product *</label>
+            <select id="releaseProductSlug" required>
+              <option value="">Select a product...</option>
+              <option value="k8inspector">K8 Inspector</option>
+              <option value="silo">SILO</option>
+              <option value="agencio-predict">Agencio Predict</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="releaseVersion">Version *</label>
+            <input type="text" id="releaseVersion" required placeholder="e.g., 2.0.1" pattern="\d+\.\d+\.\d+(-[\w.]+)?">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="releaseDate">Release Date *</label>
+            <input type="date" id="releaseDate" required>
+          </div>
+          <div class="form-group">
+            <label for="releaseMinVersion">Minimum Version</label>
+            <input type="text" id="releaseMinVersion" placeholder="e.g., 1.0.0" pattern="\d+\.\d+\.\d+(-[\w.]+)?">
+            <small>Minimum version for upgrades</small>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="releaseDownloadUrl">Download URL</label>
+          <input type="url" id="releaseDownloadUrl" placeholder="https://agencio.app/downloads">
+        </div>
+
+        <div class="form-group">
+          <label for="releaseNotes">Release Notes (Markdown)</label>
+          <textarea id="releaseNotes" rows="8" placeholder="## What's New&#10;&#10;- Feature 1&#10;- Bug fix 2&#10;&#10;### Breaking Changes&#10;..."></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="releaseIsCritical">
+              Critical Security Update
+            </label>
+            <small>Users will see an urgent notification</small>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="releaseIsActive" checked>
+              Set as Active Release
+            </label>
+            <small>Current release for this product</small>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelReleaseBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Release</button>
         </div>
       </form>
     </div>
