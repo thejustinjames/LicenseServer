@@ -1,8 +1,15 @@
 import { prisma } from '../config/database.js';
 import { SeatAssignment, License, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { config } from '../config/index.js';
 import * as emailService from './email.service.js';
 import { logger } from './logger.service.js';
+
+/** Base URL used in seat-invite links: APP_URL is the configured public origin. */
+function portalBaseUrl(): string {
+  const raw = process.env.LICENSE_PORTAL_URL || config.APP_URL || process.env.PUBLIC_URL || 'http://localhost:3000';
+  return raw.replace(/\/+$/, '');
+}
 
 export interface AssignSeatInput {
   licenseId: string;
@@ -131,8 +138,7 @@ export async function assignSeat(input: AssignSeatInput): Promise<{
   }
 
   // Generate invite URL
-  const baseUrl = process.env.LICENSE_PORTAL_URL || process.env.PUBLIC_URL || 'https://license.agencio.cloud';
-  const inviteUrl = `${baseUrl}/invite/${inviteToken}`;
+  const inviteUrl = `${portalBaseUrl()}/invite/${inviteToken}`;
 
   // Send invite email if requested (outside transaction)
   if (input.sendInvite && result.license) {
@@ -177,9 +183,9 @@ export async function removeSeat(
       where: { id: assignment.id },
     });
 
-    // Decrement seatsUsed atomically (with floor at 0)
-    await tx.license.update({
-      where: { id: licenseId },
+    // Decrement seatsUsed atomically, never below zero
+    await tx.license.updateMany({
+      where: { id: licenseId, seatsUsed: { gt: 0 } },
       data: {
         seatsUsed: {
           decrement: 1
@@ -352,8 +358,7 @@ export async function resendSeatInvite(
     },
   });
 
-  const baseUrl = process.env.LICENSE_PORTAL_URL || process.env.PUBLIC_URL || 'https://license.agencio.cloud';
-  const inviteUrl = `${baseUrl}/invite/${inviteToken}`;
+  const inviteUrl = `${portalBaseUrl()}/invite/${inviteToken}`;
 
   try {
     await emailService.sendSeatInviteEmail(

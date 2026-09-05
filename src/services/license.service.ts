@@ -2,6 +2,7 @@ import { prisma } from '../config/database.js';
 import { License, LicenseStatus, LicenseActivation, Prisma } from '@prisma/client';
 import { generateLicenseKey, validateLicenseKeyFormat } from '../utils/license-key.js';
 import { generateOfflineLicenseToken } from '../utils/crypto.js';
+import { config } from '../config/index.js';
 import * as emailService from './email.service.js';
 import { logger } from './logger.service.js';
 import type { LicenseValidationResponse, OfflineLicensePayload } from '../types/index.js';
@@ -15,12 +16,15 @@ export interface CreateLicenseInput {
   seatCount?: number;
   /** Per-license component override. Empty/omitted means inherit from product.components. */
   enabledComponents?: string[];
+  /** Local Subscription.id that paid for this license (subscription checkouts only). */
+  subscriptionId?: string;
   metadata?: Prisma.InputJsonValue;
 }
 
 export interface UpdateLicenseInput {
   status?: LicenseStatus;
-  expiresAt?: Date;
+  /** `null` clears the expiry (perpetual); `undefined` leaves it unchanged. */
+  expiresAt?: Date | null;
   maxActivations?: number;
   metadata?: Prisma.InputJsonValue;
 }
@@ -31,7 +35,9 @@ export interface LicenseWithRelations extends License {
   activations: LicenseActivation[];
 }
 
-export async function createLicense(input: CreateLicenseInput): Promise<License> {
+type Db = Prisma.TransactionClient | typeof prisma;
+
+export async function createLicense(input: CreateLicenseInput, db: Db = prisma): Promise<License> {
   const key = generateLicenseKey();
 
   // If the caller didn't specify seat count, pull the product's default so
@@ -39,18 +45,19 @@ export async function createLicense(input: CreateLicenseInput): Promise<License>
   // their advertised capacity.
   let seatCount = input.seatCount;
   if (seatCount === undefined) {
-    const product = await prisma.product.findUnique({
+    const product = await db.product.findUnique({
       where: { id: input.productId },
       select: { defaultSeatCount: true },
     });
     seatCount = product?.defaultSeatCount ?? 1;
   }
 
-  return prisma.license.create({
+  return db.license.create({
     data: {
       key,
       customerId: input.customerId,
       productId: input.productId,
+      subscriptionId: input.subscriptionId,
       expiresAt: input.expiresAt,
       maxActivations: input.maxActivations || 1,
       seatCount,
@@ -216,6 +223,16 @@ export async function validateLicense(
   };
 }
 
+/**
+ * Take a row-level lock on a license for the duration of the enclosing
+ * interactive transaction. Used to make "count activations, then insert"
+ * atomic so two concurrent activations cannot both slip under
+ * `maxActivations`.
+ */
+export async function lockLicenseRow(tx: Prisma.TransactionClient, licenseId: string): Promise<void> {
+  await tx.$executeRaw`SELECT id FROM "licenses" WHERE id = ${licenseId} FOR UPDATE`;
+}
+
 export async function activateLicense(
   licenseKey: string,
   machineFingerprint: string,
@@ -248,32 +265,57 @@ export async function activateLicense(
     return { success: true, activation: updated };
   }
 
-  if (license.activations.length >= license.maxActivations) {
-    return { success: false, error: 'Maximum activations reached' };
+  // Seat-limit check and insert must be atomic: lock the license row, then
+  // re-count inside the transaction.
+  const result = await prisma.$transaction(async (tx) => {
+    await lockLicenseRow(tx, license.id);
+
+    const existing = await tx.licenseActivation.findUnique({
+      where: { licenseId_machineFingerprint: { licenseId: license.id, machineFingerprint } },
+    });
+    if (existing) {
+      const updated = await tx.licenseActivation.update({
+        where: { id: existing.id },
+        data: { lastSeenAt: new Date(), ipAddress },
+      });
+      return { success: true as const, activation: updated, created: false };
+    }
+
+    const count = await tx.licenseActivation.count({ where: { licenseId: license.id } });
+    if (count >= license.maxActivations) {
+      return { success: false as const, error: 'Maximum activations reached' };
+    }
+
+    const activation = await tx.licenseActivation.create({
+      data: {
+        licenseId: license.id,
+        machineFingerprint,
+        machineName,
+        ipAddress,
+      },
+    });
+    return { success: true as const, activation, created: true };
+  });
+
+  if (!result.success) {
+    return { success: false, error: result.error };
   }
 
-  const activation = await prisma.licenseActivation.create({
-    data: {
-      licenseId: license.id,
-      machineFingerprint,
+  if (result.created) {
+    // Send license activated email (fire and forget)
+    emailService.sendLicenseActivatedEmail(
+      license.customer.email,
+      license.customer.name || undefined,
+      license.product.name,
+      licenseKey,
       machineName,
-      ipAddress,
-    },
-  });
+      license.expiresAt?.toLocaleDateString()
+    ).catch((err) => {
+      logger.error('Failed to send license activated email:', err);
+    });
+  }
 
-  // Send license activated email (fire and forget)
-  emailService.sendLicenseActivatedEmail(
-    license.customer.email,
-    license.customer.name || undefined,
-    license.product.name,
-    licenseKey,
-    machineName,
-    license.expiresAt?.toLocaleDateString()
-  ).catch((err) => {
-    logger.error('Failed to send license activated email:', err);
-  });
-
-  return { success: true, activation };
+  return { success: true, activation: result.activation };
 }
 
 export async function deactivateLicense(
@@ -301,8 +343,25 @@ export async function deactivateLicense(
   return { success: true };
 }
 
+/**
+ * Offline grace period for a product: the product's own setting, falling
+ * back to OFFLINE_GRACE_DAYS from config.
+ */
+export function offlineGraceDaysFor(product?: { offlineGraceDays?: number | null } | null): number {
+  const fromProduct = product?.offlineGraceDays;
+  if (typeof fromProduct === 'number' && fromProduct > 0) return fromProduct;
+  const fromConfig = parseInt(config.OFFLINE_GRACE_DAYS, 10);
+  return Number.isFinite(fromConfig) && fromConfig > 0 ? fromConfig : 7;
+}
+
 export async function generateOfflineLicense(licenseId: string): Promise<string | null> {
-  const license = await getLicenseById(licenseId);
+  const license = await prisma.license.findUnique({
+    where: { id: licenseId },
+    include: {
+      customer: { select: { id: true } },
+      product: { select: { id: true, features: true, offlineGraceDays: true } },
+    },
+  });
 
   if (!license) {
     return null;
@@ -315,7 +374,7 @@ export async function generateOfflineLicense(licenseId: string): Promise<string 
     features: license.product.features,
     expiresAt: license.expiresAt?.toISOString() || null,
     issuedAt: new Date().toISOString(),
-    gracePeriodDays: 7,
+    gracePeriodDays: offlineGraceDaysFor(license.product),
   };
 
   return generateOfflineLicenseToken(payload);
@@ -333,40 +392,94 @@ export async function getLicensesByCustomerId(customerId: string): Promise<Licen
   });
 }
 
-export async function expireLicensesForSubscription(stripeSubscriptionId: string): Promise<void> {
+/**
+ * Build the `where` clause for the licenses affected by a subscription
+ * lifecycle event. Licenses that record their issuing subscription are
+ * targeted precisely; if a subscription has no linked licenses at all
+ * (rows created before the link existed) we fall back to the customer's
+ * subscription-term licenses so legacy data keeps behaving as before.
+ */
+async function licensesForSubscription(
+  subscription: { id: string; customerId: string },
+  fromStatus: LicenseStatus,
+): Promise<Prisma.LicenseWhereInput> {
+  const linked = await prisma.license.count({ where: { subscriptionId: subscription.id } });
+  if (linked > 0) {
+    return { subscriptionId: subscription.id, status: fromStatus };
+  }
+  return {
+    customerId: subscription.customerId,
+    subscriptionId: null,
+    licenseTerm: 'SUBSCRIPTION',
+    status: fromStatus,
+  };
+}
+
+async function transitionLicensesForSubscription(
+  stripeSubscriptionId: string,
+  fromStatus: LicenseStatus,
+  toStatus: LicenseStatus,
+): Promise<number> {
   const subscription = await prisma.subscription.findUnique({
     where: { stripeSubscriptionId },
-    include: { customer: true },
+    select: { id: true, customerId: true },
   });
 
   if (!subscription) {
-    return;
+    return 0;
   }
 
-  await prisma.license.updateMany({
-    where: {
-      customerId: subscription.customerId,
-      status: 'ACTIVE',
-    },
-    data: { status: 'EXPIRED' },
-  });
+  const where = await licensesForSubscription(subscription, fromStatus);
+  const result = await prisma.license.updateMany({ where, data: { status: toStatus } });
+  return result.count;
+}
+
+export async function expireLicensesForSubscription(stripeSubscriptionId: string): Promise<void> {
+  await transitionLicensesForSubscription(stripeSubscriptionId, 'ACTIVE', 'EXPIRED');
 }
 
 export async function suspendLicensesForSubscription(stripeSubscriptionId: string): Promise<void> {
-  const subscription = await prisma.subscription.findUnique({
-    where: { stripeSubscriptionId },
-    include: { customer: true },
-  });
+  await transitionLicensesForSubscription(stripeSubscriptionId, 'ACTIVE', 'SUSPENDED');
+}
 
-  if (!subscription) {
-    return;
+export async function reactivateLicensesForSubscription(stripeSubscriptionId: string): Promise<void> {
+  await transitionLicensesForSubscription(stripeSubscriptionId, 'SUSPENDED', 'ACTIVE');
+}
+
+/**
+ * Revoke the licenses paid for by a given subscription (or, for one-time
+ * purchases, the licenses matching a product) after a full refund. Returns
+ * the number of licenses revoked. When neither a subscription nor a product
+ * can be resolved the caller decides whether to fall back to customer-wide.
+ */
+export async function revokeLicensesForRefund(input: {
+  customerId: string;
+  stripeSubscriptionId?: string | null;
+  productId?: string | null;
+}): Promise<number> {
+  if (input.stripeSubscriptionId) {
+    const subscription = await prisma.subscription.findUnique({
+      where: { stripeSubscriptionId: input.stripeSubscriptionId },
+      select: { id: true, customerId: true },
+    });
+    if (subscription) {
+      const where = await licensesForSubscription(subscription, 'ACTIVE');
+      const result = await prisma.license.updateMany({ where, data: { status: 'REVOKED' } });
+      return result.count;
+    }
   }
 
-  await prisma.license.updateMany({
-    where: {
-      customerId: subscription.customerId,
-      status: 'ACTIVE',
-    },
-    data: { status: 'SUSPENDED' },
+  if (input.productId) {
+    const result = await prisma.license.updateMany({
+      where: { customerId: input.customerId, productId: input.productId, status: 'ACTIVE' },
+      data: { status: 'REVOKED' },
+    });
+    return result.count;
+  }
+
+  const result = await prisma.license.updateMany({
+    where: { customerId: input.customerId, status: 'ACTIVE' },
+    data: { status: 'REVOKED' },
   });
+  return result.count;
 }

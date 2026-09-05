@@ -1,4 +1,6 @@
+import { randomBytes } from 'crypto';
 import { prisma } from '../config/database.js';
+import { config } from '../config/index.js';
 import { Quote, QuoteStatus, LicenseTerm, Prisma } from '@prisma/client';
 import { generateLicenseKey } from '../utils/license-key.js';
 import * as emailService from './email.service.js';
@@ -37,7 +39,14 @@ function generateQuoteNumber(): string {
   const date = new Date();
   const year = date.getFullYear().toString().slice(-2);
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+  // Unambiguous alphabet, cryptographically random: quote_number is unique
+  // in the DB so a predictable / colliding generator surfaces as a 500.
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(6);
+  let random = '';
+  for (let i = 0; i < bytes.length; i++) {
+    random += alphabet[bytes[i] % alphabet.length];
+  }
   return `Q${year}${month}-${random}`;
 }
 
@@ -259,7 +268,7 @@ export async function sendQuote(id: string): Promise<{ success: boolean; error?:
     }
 
     // Generate accept URL
-    const baseUrl = process.env.APP_URL || process.env.PUBLIC_URL || 'https://licensing.agencio.cloud';
+    const baseUrl = (config.APP_URL || process.env.PUBLIC_URL || 'http://localhost:3000').replace(/\/+$/, '');
     const acceptUrl = `${baseUrl}/quote/${quoteWithProduct.quoteNumber}/accept`;
 
     // Send quote email

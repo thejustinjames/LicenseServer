@@ -118,14 +118,39 @@ export async function sendEmail(email: EmailData): Promise<boolean> {
 }
 
 /**
+ * Escape a value for interpolation into HTML. Names, product names and
+ * machine names come from customers and must not be able to inject markup
+ * into the emails we send.
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeData(
+  data: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean | undefined> {
+  const out: Record<string, string | number | boolean | undefined> = {};
+  for (const [key, value] of Object.entries(data)) {
+    out[key] = typeof value === 'string' ? escapeHtml(value) : value;
+  }
+  return out;
+}
+
+/**
  * Get email subject and body for a template
  */
-function getEmailContent(template: EmailTemplate, data: Record<string, string | number | boolean | undefined>): {
+function getEmailContent(template: EmailTemplate, rawData: Record<string, string | number | boolean | undefined>): {
   subject: string;
   body: string;
 } {
-  const appName = config.APP_NAME || 'License Server';
-  const supportEmail = config.SUPPORT_EMAIL || emailConfig?.senderEmail || 'support@example.com';
+  const data = escapeData(rawData);
+  const appName = escapeHtml(config.APP_NAME || 'License Server');
+  const supportEmail = escapeHtml(config.SUPPORT_EMAIL || emailConfig?.senderEmail || 'support@example.com');
 
   switch (template) {
     case 'welcome':

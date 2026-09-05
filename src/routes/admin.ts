@@ -1,10 +1,11 @@
-import { Router, Response } from 'express';
+import { Router, Response, Request, NextFunction } from 'express';
 import { z } from 'zod';
 import multer from 'multer';
+import { LicenseStatus, SubscriptionStatus, QuoteStatus } from '@prisma/client';
 import { authenticate } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
 import { idleTimeout } from '../middleware/idleTimeout.js';
-import { validateIdParam, parsePositiveInt, sanitizeString } from '../middleware/validation.js';
+import { validateIdParam, validateUUIDParam, parsePositiveInt, sanitizeString, resourceIdSchema } from '../middleware/validation.js';
 import * as productService from '../services/product.service.js';
 import * as licenseService from '../services/license.service.js';
 import * as customerService from '../services/customer.service.js';
@@ -61,6 +62,38 @@ const upload = multer({
     }
   },
 });
+
+/**
+ * Run multer's single-file handler and turn its errors (unsupported type,
+ * file too large) into 400/413 JSON responses instead of letting them reach
+ * the generic 500 handler.
+ */
+function uploadSingle(field: string) {
+  const handler = upload.single(field);
+  return (req: Request, res: Response, next: NextFunction) => {
+    handler(req, res, (err: unknown) => {
+      if (!err) {
+        next();
+        return;
+      }
+      if (err instanceof multer.MulterError) {
+        res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.message });
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      res.status(400).json({ error: message });
+    });
+  };
+}
+
+/** Parse an optional enum query parameter; returns `{ error }` on a bad value. */
+function parseEnumQuery<T extends string>(value: unknown, allowed: readonly T[]): { value?: T; error?: string } {
+  if (value === undefined || value === '') return {};
+  if (typeof value === 'string' && (allowed as readonly string[]).includes(value)) {
+    return { value: value as T };
+  }
+  return { error: `Invalid value. Expected one of: ${allowed.join(', ')}` };
+}
 
 const router = Router();
 
@@ -123,7 +156,7 @@ const updateProductSchema = z.object({
 // License schemas
 const createLicenseSchema = z.object({
   customerId: z.string().uuid(),
-  productId: z.string().uuid(),
+  productId: resourceIdSchema,
   expiresAt: z.string().datetime().optional(),
   maxActivations: z.number().positive().optional(),
   seatCount: z.number().int().positive().max(10000).optional(),
@@ -137,7 +170,7 @@ const createLicenseSchema = z.object({
 // the license `metadata.test = true`, and defaults seat count from the
 // product so cortex SKUs come out with their full seat allocation.
 const issueTestLicenseSchema = z.object({
-  productId: z.string().uuid(),
+  productId: resourceIdSchema,
   seatCount: z.number().int().positive().max(10000).optional(),
   expiresInDays: z.number().int().positive().max(3650).optional(),
   customerEmail: z.string().email().optional(),
@@ -208,11 +241,10 @@ router.get('/products/:id', validateIdParam, async (req: AuthenticatedRequest, r
 
 router.put('/products/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // `null` values are deliberate "clear this field" requests and are
+    // passed through to Prisma as-is.
     const data = updateProductSchema.parse(req.body);
-    const product = await productService.updateProduct(req.params.id, {
-      ...data,
-      licenseDurationDays: data.licenseDurationDays ?? undefined,
-    });
+    const product = await productService.updateProduct(req.params.id, data);
     res.json(product);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -352,10 +384,15 @@ router.post('/licenses/test', async (req: AuthenticatedRequest, res: Response) =
 
 router.get('/licenses', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const status = parseEnumQuery(req.query.status, Object.values(LicenseStatus));
+    if (status.error) {
+      res.status(400).json({ error: status.error });
+      return;
+    }
     const filters = {
       customerId: req.query.customerId as string | undefined,
       productId: req.query.productId as string | undefined,
-      status: req.query.status as 'ACTIVE' | 'EXPIRED' | 'REVOKED' | 'SUSPENDED' | undefined,
+      status: status.value,
     };
     const licenses = await licenseService.listLicenses(filters);
     res.json(licenses);
@@ -382,9 +419,10 @@ router.get('/licenses/:id', validateIdParam, async (req: AuthenticatedRequest, r
 router.put('/licenses/:id', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const data = updateLicenseSchema.parse(req.body);
+    // expiresAt: null clears the expiry (perpetual); omitted leaves it as-is.
     const license = await licenseService.updateLicense(req.params.id, {
       ...data,
-      expiresAt: data.expiresAt === null ? undefined : data.expiresAt ? new Date(data.expiresAt) : undefined,
+      expiresAt: data.expiresAt === null ? null : data.expiresAt ? new Date(data.expiresAt) : undefined,
     });
     res.json(license);
   } catch (error) {
@@ -510,8 +548,16 @@ router.get('/licenses/:id/packs', validateIdParam, async (req: AuthenticatedRequ
 });
 
 // Revoke a previously granted pack.
-router.post('/licenses/:id/packs/:packId/revoke', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/licenses/:id/packs/:packId/revoke', validateIdParam, validateUUIDParam('packId'), async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const pack = await prisma.licenseSeatPack.findUnique({
+      where: { id: req.params.packId },
+      select: { licenseId: true },
+    });
+    if (!pack || pack.licenseId !== req.params.id) {
+      res.status(404).json({ error: 'Seat pack not found for this license' });
+      return;
+    }
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : undefined;
     const totals = await entitlementService.revokePack(req.params.packId, reason);
     res.json(totals);
@@ -614,7 +660,7 @@ router.post('/licenses/:id/seats/bulk', validateIdParam, async (req: Authenticat
 });
 
 // Remove a seat assignment
-router.delete('/licenses/:id/seats/:email', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/licenses/:id/seats/:email', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await seatService.removeSeat(req.params.id, req.params.email);
 
@@ -631,7 +677,7 @@ router.delete('/licenses/:id/seats/:email', async (req: AuthenticatedRequest, re
 });
 
 // Resend seat invite
-router.post('/licenses/:id/seats/:email/resend', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/licenses/:id/seats/:email/resend', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await seatService.resendSeatInvite(req.params.id, req.params.email);
 
@@ -680,7 +726,7 @@ router.delete('/activations/:id', validateIdParam, async (req: AuthenticatedRequ
 // ============================================================================
 
 const createQuoteSchema = z.object({
-  productId: z.string().uuid(),
+  productId: resourceIdSchema,
   contactEmail: z.string().email(),
   contactName: z.string().optional(),
   companyName: z.string().optional(),
@@ -697,8 +743,13 @@ const createQuoteSchema = z.object({
 // List quotes
 router.get('/quotes', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const status = parseEnumQuery(req.query.status, Object.values(QuoteStatus));
+    if (status.error) {
+      res.status(400).json({ error: status.error });
+      return;
+    }
     const quotes = await quoteService.listQuotes({
-      status: req.query.status as 'DRAFT' | 'SENT' | 'ACCEPTED' | undefined,
+      status: status.value,
       customerId: req.query.customerId as string | undefined,
       productId: req.query.productId as string | undefined,
     });
@@ -1073,8 +1124,13 @@ router.get('/products/:id/pricing', validateIdParam, async (req: AuthenticatedRe
 // List all subscriptions
 router.get('/subscriptions', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const status = parseEnumQuery(req.query.status, Object.values(SubscriptionStatus));
+    if (status.error) {
+      res.status(400).json({ error: status.error });
+      return;
+    }
     const subscriptions = await prisma.subscription.findMany({
-      where: req.query.status ? { status: req.query.status as 'ACTIVE' | 'CANCELED' | 'PAST_DUE' } : undefined,
+      where: status.value ? { status: status.value } : undefined,
       include: {
         customer: { select: { id: true, email: true, name: true } },
       },
@@ -1329,7 +1385,7 @@ router.get('/promotion-codes/validate/:code', async (req: AuthenticatedRequest, 
 router.post(
   '/products/:id/upload',
   validateIdParam,
-  upload.single('file'),
+  uploadSingle('file'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (!storageService.isS3Configured()) {
@@ -1479,6 +1535,14 @@ router.delete('/products/:id/bundles/:key(*)', validateIdParam, async (req: Auth
     }
 
     const key = req.params.key;
+
+    // Only objects under this product's own bundle prefix may be deleted
+    // through this route.
+    const prefix = storageService.getProductBundlePrefix(product.category || 'products', product.name);
+    if (!key.startsWith(prefix) || key.includes('..')) {
+      res.status(400).json({ error: 'Bundle key does not belong to this product' });
+      return;
+    }
 
     // Don't allow deleting the active bundle
     if (key === product.s3PackageKey) {

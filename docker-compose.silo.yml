@@ -35,6 +35,9 @@ services:
       # Server
       PORT: 3000
       NODE_ENV: production
+      # nginx sits in front of this container: trust one proxy hop so
+      # rate limiting / lockout key on the real client IP.
+      TRUST_PROXY: "1"
 
       # JWT Auth
       JWT_SECRET: ${JWT_SECRET:-license-server-jwt-secret-2026}

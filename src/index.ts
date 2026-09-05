@@ -31,6 +31,17 @@ import updatesRoutes from './routes/updates.js';
 
 const app = express();
 
+// Trust the reverse proxy so req.ip / req.secure reflect the real client.
+app.set('trust proxy', parseTrustProxy(config.TRUST_PROXY));
+
+function parseTrustProxy(value: string): boolean | number | string {
+  const v = value.trim();
+  if (v === '' || v.toLowerCase() === 'false') return false;
+  if (v.toLowerCase() === 'true') return true;
+  if (/^\d+$/.test(v)) return parseInt(v, 10);
+  return v; // e.g. "loopback, 10.0.0.0/8"
+}
+
 // Security middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -72,6 +83,26 @@ app.use('/webhooks', express.raw({ type: 'application/json' }));
 // JSON parsing for all other routes with configurable size limit
 app.use(express.json({ limit: config.REQUEST_BODY_LIMIT }));
 
+// Idle-timeout configuration for the frontend timer. Public so the login
+// pages can read it before authenticating. Registered *before* the unified
+// auth router: that router 503s every /api/auth/* request unless
+// AUTH_PROVIDER=cognito, which used to swallow these two endpoints on
+// JWT deployments.
+app.get('/api/auth/idle-config', (_req, res) => {
+  const timeoutMs = parseInt(config.SESSION_IDLE_TIMEOUT_MS, 10);
+  let warnMs = parseInt(config.SESSION_IDLE_WARN_MS, 10);
+  if (!Number.isFinite(warnMs) || warnMs <= 0 || warnMs >= timeoutMs) {
+    warnMs = Math.max(timeoutMs - 60_000, Math.floor(timeoutMs * 0.9));
+  }
+  res.json({ timeoutMs, warnMs });
+});
+
+// Authenticated heartbeat: the frontend "Stay signed in" button hits this
+// to refresh the server-side idle entry without doing any real work.
+app.get('/api/auth/heartbeat', authenticate, idleTimeoutMiddleware, (_req, res) => {
+  res.json({ ok: true, timestamp: new Date().toISOString() });
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
@@ -89,23 +120,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicPath = path.join(__dirname, '../public');
 app.use(express.static(publicPath));
-
-// Idle-timeout configuration for the frontend timer. Public so the login
-// pages can read it before authenticating.
-app.get('/api/auth/idle-config', (_req, res) => {
-  const timeoutMs = parseInt(config.SESSION_IDLE_TIMEOUT_MS, 10);
-  let warnMs = parseInt(config.SESSION_IDLE_WARN_MS, 10);
-  if (!Number.isFinite(warnMs) || warnMs <= 0 || warnMs >= timeoutMs) {
-    warnMs = Math.max(timeoutMs - 60_000, Math.floor(timeoutMs * 0.9));
-  }
-  res.json({ timeoutMs, warnMs });
-});
-
-// Authenticated heartbeat: the frontend "Stay signed in" button hits this
-// to refresh the server-side idle entry without doing any real work.
-app.get('/api/auth/heartbeat', authenticate, idleTimeoutMiddleware, (_req, res) => {
-  res.json({ ok: true, timestamp: new Date().toISOString() });
-});
 
 // API info endpoint
 app.get('/api', (_req, res) => {
@@ -196,6 +210,11 @@ app.get('/health/ready', async (_req, res) => {
   });
 });
 
+// Unknown API routes must return JSON 404s, not the SPA shell.
+app.all(['/api', '/api/*', '/webhooks', '/webhooks/*', '/health/*'], (_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 // SPA catch-all route - serve index.html for any non-API routes
 // This must come AFTER static middleware and API routes, but BEFORE 404 handler
 app.get('*', (_req, res) => {
@@ -208,7 +227,24 @@ app.use((_req, res) => {
 });
 
 // Error handler
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error & { type?: string; status?: number; code?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (res.headersSent) {
+    return;
+  }
+  // body-parser errors are client errors, not server faults
+  if (err.type === 'entity.parse.failed') {
+    res.status(400).json({ error: 'Malformed JSON body' });
+    return;
+  }
+  if (err.type === 'entity.too.large') {
+    res.status(413).json({ error: 'Request body too large' });
+    return;
+  }
+  if (err.name === 'MulterError') {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    res.status(status).json({ error: err.message });
+    return;
+  }
   logger.error('Unhandled error', err);
   res.status(500).json({ error: 'Internal server error' });
 });

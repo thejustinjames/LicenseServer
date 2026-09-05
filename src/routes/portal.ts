@@ -4,7 +4,7 @@ import { authenticate, getAuthProvider } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rateLimit.js';
 import { idleTimeout, seedSession } from '../middleware/idleTimeout.js';
 import { clearSession } from '../config/redis.js';
-import { validateIdParam, validateUUIDParam, parsePositiveInt } from '../middleware/validation.js';
+import { validateIdParam, validateUUIDParam, parsePositiveInt, parseNonNegativeInt, resourceIdSchema } from '../middleware/validation.js';
 import * as customerService from '../services/customer.service.js';
 import * as licenseService from '../services/license.service.js';
 import * as paymentService from '../services/payment.service.js';
@@ -13,6 +13,7 @@ import * as productService from '../services/product.service.js';
 import * as captchaService from '../services/captcha.service.js';
 import * as seatService from '../services/seat.service.js';
 import { passwordSchema, getPasswordRequirementsText } from '../utils/password.js';
+import { isValidAdminApiKey } from '../utils/apiKey.js';
 import { JWTAuthProvider } from '../auth/jwt.auth.js';
 import { logger } from '../services/logger.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
@@ -385,12 +386,31 @@ router.put('/me', authenticate, idleTimeout, async (req: AuthenticatedRequest, r
     }
 
     const updateSchema = z.object({
-      name: z.string().optional(),
-      password: z.string().min(8).optional(),
+      name: z.string().max(100).optional(),
+      currentPassword: z.string().optional(),
+      password: passwordSchema.optional(),
     });
 
     const data = updateSchema.parse(req.body);
-    const customer = await customerService.updateCustomer(req.user.id, data);
+
+    // Changing the password requires proving knowledge of the current one so
+    // a hijacked session cannot lock the real owner out.
+    if (data.password) {
+      if (!data.currentPassword) {
+        res.status(400).json({ error: 'currentPassword is required to change your password' });
+        return;
+      }
+      const ok = await customerService.verifyCustomerPassword(req.user.id, data.currentPassword);
+      if (!ok) {
+        res.status(401).json({ error: 'Current password is incorrect' });
+        return;
+      }
+    }
+
+    const customer = await customerService.updateCustomer(req.user.id, {
+      name: data.name,
+      password: data.password,
+    });
     res.json(customer);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -487,7 +507,7 @@ router.post('/billing/checkout', authenticate, idleTimeout, async (req: Authenti
     }
 
     const checkoutSchema = z.object({
-      productId: z.string().uuid(),
+      productId: resourceIdSchema,
       successUrl: z.string().url().optional(),
       cancelUrl: z.string().url().optional(),
       billingInterval: z.enum(['monthly', 'annual']).optional(),
@@ -567,7 +587,7 @@ router.post('/subscriptions/:id/cancel', authenticate, idleTimeout, validateIdPa
       return;
     }
 
-    await paymentService.cancelSubscription(req.params.id);
+    await paymentService.cancelSubscription(req.params.id, req.user.id);
     res.json({ success: true, message: 'Subscription will be canceled at period end' });
   } catch (error) {
     if (error instanceof Error && error.message.includes('not found')) {
@@ -587,7 +607,7 @@ router.post('/subscriptions/:id/reactivate', authenticate, idleTimeout, validate
       return;
     }
 
-    await paymentService.reactivateSubscription(req.params.id);
+    await paymentService.reactivateSubscription(req.params.id, req.user.id);
     res.json({ success: true, message: 'Subscription reactivated' });
   } catch (error) {
     if (error instanceof Error && error.message.includes('not found')) {
@@ -607,7 +627,7 @@ router.get('/subscriptions/:id/usage', authenticate, idleTimeout, validateIdPara
       return;
     }
 
-    const summary = await paymentService.getUsageSummary(req.params.id);
+    const summary = await paymentService.getUsageSummary(req.params.id, req.user.id);
     if (!summary) {
       res.status(404).json({ error: 'Subscription not found or not metered' });
       return;
@@ -630,6 +650,7 @@ router.get('/subscriptions/:id/usage/records', authenticate, idleTimeout, valida
 
     const records = await paymentService.getUsageRecords(req.params.id, {
       limit: req.query.limit ? parsePositiveInt(req.query.limit as string, 100, 1000) : undefined,
+      customerId: req.user.id,
     });
     res.json(records);
   } catch (error) {
@@ -744,6 +765,18 @@ router.post('/invite/:token/accept', authRateLimit, async (req, res: Response) =
         password: data.password,
         name: data.name || assignment.name || undefined,
       });
+    } else {
+      // The invitee already has an account: the supplied password must be
+      // their real one. Checked without the lockout side-effects of a normal
+      // login so an invite link cannot be used to lock the invitee out.
+      const ok = await customerService.verifyCustomerPassword(existingCustomer.id, data.password);
+      if (!ok) {
+        res.status(401).json({
+          success: false,
+          error: 'An account with this email already exists. Enter that account\'s password to accept the invite.',
+        });
+        return;
+      }
     }
 
     // Accept the seat invite
@@ -929,18 +962,25 @@ router.get('/credits/transactions', authenticate, idleTimeout, async (req: Authe
       return;
     }
 
-    const limit = parsePositiveInt(req.query.limit as string, 50);
-    const offset = parsePositiveInt(req.query.offset as string, 0);
-    const type = req.query.type as string | undefined;
+    const limit = parsePositiveInt(req.query.limit as string, 50, 200);
+    const offset = parseNonNegativeInt(req.query.offset as string, 0, 100000);
+    const rawType = req.query.type as string | undefined;
+    const type = rawType && rawType !== 'all'
+      ? z.nativeEnum(CreditTransactionType).parse(rawType)
+      : undefined;
 
     const result = await creditService.getTransactionHistory(req.user.id, {
       limit,
       offset,
-      type: type && type !== 'all' ? type as CreditTransactionType : undefined,
+      type,
     });
 
     res.json({ success: true, data: result });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid transaction type', details: error.errors });
+      return;
+    }
     logger.error('Get credit transactions error:', error);
     res.status(500).json({ error: 'Failed to get transaction history' });
   }
@@ -1093,8 +1133,6 @@ router.get('/credits/check', authenticate, async (req: AuthenticatedRequest, res
 // SERVER-TO-SERVER CUSTOMER CREATION
 // ============================================================================
 
-import { config } from '../config/index.js';
-
 const createExternalCustomerSchema = z.object({
   externalId: z.string().min(1),
   email: z.string().email(),
@@ -1111,11 +1149,10 @@ const createExternalCustomerSchema = z.object({
  */
 router.post('/customers', async (req, res: Response) => {
   try {
-    // API key authentication
-    const apiKey = req.headers['x-api-key'];
-    if (!config.ADMIN_API_KEY || apiKey !== config.ADMIN_API_KEY) {
+    // API key authentication (constant-time; fails closed when unset)
+    if (!isValidAdminApiKey(req.headers['x-api-key'])) {
       logger.warn('Unauthorized external customer creation attempt', {
-        hasKey: !!apiKey,
+        hasKey: !!req.headers['x-api-key'],
         ip: req.ip,
       });
       res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -1166,9 +1203,8 @@ router.post('/customers', async (req, res: Response) => {
  */
 router.get('/customers/:externalId', async (req, res: Response) => {
   try {
-    // API key authentication
-    const apiKey = req.headers['x-api-key'];
-    if (!config.ADMIN_API_KEY || apiKey !== config.ADMIN_API_KEY) {
+    // API key authentication (constant-time; fails closed when unset)
+    if (!isValidAdminApiKey(req.headers['x-api-key'])) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }

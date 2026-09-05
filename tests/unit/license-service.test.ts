@@ -1,25 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock Prisma
-vi.mock('../../src/config/database.js', () => ({
-  prisma: {
+vi.mock('../../src/config/database.js', () => {
+  const prisma: Record<string, unknown> = {
     license: {
       create: vi.fn(),
       findUnique: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
+      count: vi.fn(),
     },
     licenseActivation: {
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      findUnique: vi.fn(),
+      count: vi.fn(),
+    },
+    product: {
+      findUnique: vi.fn(),
     },
     subscription: {
       findUnique: vi.fn(),
     },
-  },
-}));
+    $executeRaw: vi.fn(),
+  };
+  // Interactive transactions run the callback against the same mock client.
+  prisma.$transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma));
+  return { prisma };
+});
 
 // Mock email service
 vi.mock('../../src/services/email.service.js', () => ({
@@ -57,6 +67,7 @@ describe('License Service', () => {
       };
 
       vi.mocked(prisma.license.create).mockResolvedValue(mockLicense as any);
+      vi.mocked(prisma.product.findUnique).mockResolvedValue({ defaultSeatCount: 5 } as any);
 
       const result = await licenseService.createLicense({
         customerId: 'customer-1',
@@ -68,10 +79,33 @@ describe('License Service', () => {
           customerId: 'customer-1',
           productId: 'product-1',
           maxActivations: 1,
+          seatCount: 5,
           key: expect.stringMatching(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/),
         }),
       });
       expect(result.id).toBe('test-id');
+    });
+
+    it('should default seatCount to 1 when the product is unknown', async () => {
+      vi.mocked(prisma.license.create).mockResolvedValue({ id: 'x' } as any);
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(null);
+
+      await licenseService.createLicense({ customerId: 'c', productId: 'p' });
+
+      expect(prisma.license.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ seatCount: 1 }),
+      });
+    });
+
+    it('should not look up the product when seatCount is given', async () => {
+      vi.mocked(prisma.license.create).mockResolvedValue({ id: 'x' } as any);
+
+      await licenseService.createLicense({ customerId: 'c', productId: 'p', seatCount: 20 });
+
+      expect(prisma.product.findUnique).not.toHaveBeenCalled();
+      expect(prisma.license.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ seatCount: 20 }),
+      });
     });
 
     it('should use custom maxActivations if provided', async () => {
@@ -231,6 +265,8 @@ describe('License Service', () => {
       };
 
       vi.mocked(prisma.license.findUnique).mockResolvedValue(mockLicense as any);
+      vi.mocked(prisma.licenseActivation.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.licenseActivation.count).mockResolvedValue(0);
       vi.mocked(prisma.licenseActivation.create).mockResolvedValue(mockActivation);
 
       const result = await licenseService.activateLicense(
@@ -243,6 +279,33 @@ describe('License Service', () => {
       expect(result.success).toBe(true);
       expect(result.activation).toBeDefined();
       expect(prisma.licenseActivation.create).toHaveBeenCalled();
+      // The seat check runs inside a transaction holding a row lock
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(prisma.$executeRaw).toHaveBeenCalled();
+    });
+
+    it('should reject when a concurrent activation filled the last seat', async () => {
+      const mockLicense = {
+        id: 'test-id',
+        key: 'ABCD-EFGH-IJKL-MNOP',
+        status: 'ACTIVE',
+        expiresAt: null,
+        maxActivations: 1,
+        activations: [], // stale snapshot: looked free when we read it
+        product: { id: 'product-1', name: 'Test Product', features: [] },
+        customer: { id: 'customer-1', email: 'test@example.com', name: 'Test User' },
+      };
+
+      vi.mocked(prisma.license.findUnique).mockResolvedValue(mockLicense as any);
+      vi.mocked(prisma.licenseActivation.findUnique).mockResolvedValue(null);
+      // Inside the lock the authoritative count says the seat is taken
+      vi.mocked(prisma.licenseActivation.count).mockResolvedValue(1);
+
+      const result = await licenseService.activateLicense('ABCD-EFGH-IJKL-MNOP', 'device-123');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Maximum activations reached');
+      expect(prisma.licenseActivation.create).not.toHaveBeenCalled();
     });
 
     it('should reject activation when max reached', async () => {
@@ -266,6 +329,8 @@ describe('License Service', () => {
       };
 
       vi.mocked(prisma.license.findUnique).mockResolvedValue(mockLicense as any);
+      vi.mocked(prisma.licenseActivation.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.licenseActivation.count).mockResolvedValue(1);
 
       const result = await licenseService.activateLicense(
         'ABCD-EFGH-IJKL-MNOP',

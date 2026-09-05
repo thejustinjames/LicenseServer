@@ -54,6 +54,29 @@ export interface ConsumptionResult {
 }
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Lock a customer's credit balance row for the rest of the enclosing
+ * interactive transaction. Every read-modify-write on the balance goes
+ * through this so concurrent reservations / consumptions serialise instead
+ * of both reading the same stale balance and overdrawing.
+ */
+async function lockBalanceRow(tx: Prisma.TransactionClient, balanceId: string): Promise<void> {
+  await tx.$executeRaw`SELECT id FROM "credit_balances" WHERE id = ${balanceId} FOR UPDATE`;
+}
+
+/** Prisma returns BigInt columns; JSON.stringify cannot serialise them. */
+function serializeTransaction<T extends Record<string, unknown>>(tx: T): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(tx)) {
+    out[key] = typeof value === 'bigint' ? Number(value) : value;
+  }
+  return out;
+}
+
+// =============================================================================
 // CREDIT BALANCE MANAGEMENT
 // =============================================================================
 
@@ -153,11 +176,12 @@ export async function reserveCredits(
   }
 
   return prisma.$transaction(async (tx) => {
-    const balance = await tx.creditBalance.findUnique({
+    const found = await tx.creditBalance.findUnique({
       where: { customerId },
+      select: { id: true },
     });
 
-    if (!balance) {
+    if (!found) {
       return {
         success: false,
         reservationId: '',
@@ -166,6 +190,9 @@ export async function reserveCredits(
         error: 'Credit balance not found',
       };
     }
+
+    await lockBalanceRow(tx, found.id);
+    const balance = await tx.creditBalance.findUniqueOrThrow({ where: { id: found.id } });
 
     const effective = balance.availableCents - balance.reservedCents;
     if (effective < BigInt(amountCents)) {
@@ -218,18 +245,42 @@ export async function releaseReservation(
 ): Promise<{ success: boolean; released: number }> {
   return prisma.$transaction(async (tx) => {
     // Find the reservation transaction
-    const reservation = await tx.creditTransaction.findFirst({
+    const found = await tx.creditTransaction.findFirst({
       where: {
         creditBalance: { customerId },
         type: CreditTransactionType.RESERVATION,
         metadata: { path: ['reservationId'], equals: reservationId },
       },
-      include: { creditBalance: true },
+      select: { id: true, creditBalanceId: true },
     });
 
-    if (!reservation) {
+    if (!found) {
       return { success: false, released: 0 };
     }
+
+    await lockBalanceRow(tx, found.creditBalanceId);
+
+    // A reservation can be settled exactly once: refuse a second release or a
+    // release after consumption, otherwise reservedCents drifts and the
+    // customer regains credit that was already spent.
+    const settled = await tx.creditTransaction.findFirst({
+      where: {
+        creditBalanceId: found.creditBalanceId,
+        OR: [
+          { type: CreditTransactionType.RELEASE, metadata: { path: ['originalReservationId'], equals: reservationId } },
+          { type: CreditTransactionType.CONSUMPTION, metadata: { path: ['reservationId'], equals: reservationId } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (settled) {
+      return { success: false, released: 0 };
+    }
+
+    const reservation = await tx.creditTransaction.findUniqueOrThrow({
+      where: { id: found.id },
+      include: { creditBalance: true },
+    });
 
     const amountToRelease = Math.abs(reservation.amountCents);
 
@@ -280,12 +331,46 @@ export async function consumeCredits(
   }
 ): Promise<ConsumptionResult> {
   return prisma.$transaction(async (tx) => {
-    const balance = await tx.creditBalance.findUnique({
+    const found = await tx.creditBalance.findUnique({
       where: { customerId },
+      select: { id: true },
     });
 
-    if (!balance) {
+    if (!found) {
       throw new Error('Credit balance not found');
+    }
+
+    await lockBalanceRow(tx, found.id);
+    const balance = await tx.creditBalance.findUniqueOrThrow({ where: { id: found.id } });
+
+    // Idempotency: consuming the same reservation twice must not deduct twice.
+    const alreadyConsumed = await tx.creditTransaction.findFirst({
+      where: {
+        creditBalanceId: balance.id,
+        type: CreditTransactionType.CONSUMPTION,
+        metadata: { path: ['reservationId'], equals: reservationId },
+      },
+    });
+    if (alreadyConsumed) {
+      return {
+        success: true,
+        newBalance: Number(balance.availableCents),
+        transactionId: alreadyConsumed.id,
+        autoRefillTriggered: false,
+      };
+    }
+
+    // A released reservation can no longer be consumed.
+    const released = await tx.creditTransaction.findFirst({
+      where: {
+        creditBalanceId: balance.id,
+        type: CreditTransactionType.RELEASE,
+        metadata: { path: ['originalReservationId'], equals: reservationId },
+      },
+      select: { id: true },
+    });
+    if (released) {
+      throw new Error('Reservation has already been released');
     }
 
     // Find reservation to get reserved amount
@@ -388,6 +473,9 @@ export async function addPurchasedCredits(
         data: { customerId },
       });
     }
+
+    await lockBalanceRow(tx, balance.id);
+    balance = await tx.creditBalance.findUniqueOrThrow({ where: { id: balance.id } });
 
     const totalAmount = BigInt(amountCents + bonusCents);
     const amountBigInt = BigInt(amountCents);
@@ -746,13 +834,17 @@ export async function refundCredits(
   reason?: string
 ): Promise<{ success: boolean; newBalance: number }> {
   return prisma.$transaction(async (tx) => {
-    const balance = await tx.creditBalance.findUnique({
+    const found = await tx.creditBalance.findUnique({
       where: { customerId },
+      select: { id: true },
     });
 
-    if (!balance) {
+    if (!found) {
       return { success: false, newBalance: 0 };
     }
+
+    await lockBalanceRow(tx, found.id);
+    const balance = await tx.creditBalance.findUniqueOrThrow({ where: { id: found.id } });
 
     // Deduct the refunded amount (can go negative if user spent credits)
     const newAvailable = BigInt(Math.max(0, Number(balance.availableCents) - amountCents));
@@ -805,6 +897,9 @@ export async function adjustCredits(
         data: { customerId },
       });
     }
+
+    await lockBalanceRow(tx, balance.id);
+    balance = await tx.creditBalance.findUniqueOrThrow({ where: { id: balance.id } });
 
     const newAvailable = BigInt(Math.max(0, Number(balance.availableCents) + amountCents));
 
@@ -880,7 +975,7 @@ export async function getTransactionHistory(
   ]);
 
   return {
-    transactions,
+    transactions: transactions.map((t) => serializeTransaction(t)),
     total,
     hasMore: offset + transactions.length < total,
   };

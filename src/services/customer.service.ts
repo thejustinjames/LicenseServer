@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../config/database.js';
 import { stripe } from '../config/stripe.js';
 import { config } from '../config/index.js';
@@ -39,9 +40,19 @@ function omitPassword(customer: Customer): CustomerWithoutPassword {
   return rest;
 }
 
+/**
+ * Canonical form of an email address for storage and lookup. Email is the
+ * unique key on customers, so `Foo@Example.com` and `foo@example.com` must
+ * resolve to the same account.
+ */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export async function createCustomer(input: CreateCustomerInput): Promise<CustomerWithoutPassword> {
+  const email = normalizeEmail(input.email);
   const existingCustomer = await prisma.customer.findUnique({
-    where: { email: input.email },
+    where: { email },
   });
 
   if (existingCustomer) {
@@ -53,7 +64,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
   let stripeCustomerId: string | undefined;
   try {
     const stripeCustomer = await stripe.customers.create({
-      email: input.email,
+      email,
       name: input.name,
     });
     stripeCustomerId = stripeCustomer.id;
@@ -63,7 +74,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
 
   const customer = await prisma.customer.create({
     data: {
-      email: input.email,
+      email,
       passwordHash,
       name: input.name,
       isAdmin: input.isAdmin || false,
@@ -85,7 +96,8 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
  * Create a customer from an external system (e.g., Agencio Predict).
  * External customers don't need a password as they authenticate via their source system.
  */
-export async function createExternalCustomer(input: CreateExternalCustomerInput): Promise<CustomerWithoutPassword> {
+export async function createExternalCustomer(rawInput: CreateExternalCustomerInput): Promise<CustomerWithoutPassword> {
+  const input = { ...rawInput, email: normalizeEmail(rawInput.email) };
   // Check if customer already exists by external ID
   const existingByExternal = await prisma.customer.findUnique({
     where: { externalId: input.externalId },
@@ -185,8 +197,25 @@ export async function getCustomerById(id: string): Promise<CustomerWithoutPasswo
 
 export async function getCustomerByEmail(email: string): Promise<Customer | null> {
   return prisma.customer.findUnique({
-    where: { email },
+    where: { email: normalizeEmail(email) },
   });
+}
+
+/**
+ * Check a password against a customer's stored hash without any of the
+ * lockout bookkeeping that `authenticateCustomer` performs. Used for
+ * "prove you know the current password" checks on an already-authenticated
+ * session or an invite acceptance.
+ */
+export async function verifyCustomerPassword(customerId: string, password: string): Promise<boolean> {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { passwordHash: true },
+  });
+  if (!customer) {
+    return false;
+  }
+  return bcrypt.compare(password, customer.passwordHash);
 }
 
 export async function getCustomerByStripeId(stripeCustomerId: string): Promise<CustomerWithoutPassword | null> {
@@ -208,7 +237,7 @@ export async function listCustomers(): Promise<CustomerWithoutPassword[]> {
 export async function updateCustomer(id: string, input: UpdateCustomerInput): Promise<CustomerWithoutPassword> {
   const data: Record<string, unknown> = {};
 
-  if (input.email) data.email = input.email;
+  if (input.email) data.email = normalizeEmail(input.email);
   if (input.name) data.name = input.name;
   if (input.password) {
     data.passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
@@ -249,7 +278,8 @@ export interface AuthError {
   lockoutMinutesRemaining?: number;
 }
 
-export async function authenticateCustomer(email: string, password: string): Promise<AuthResult | AuthError> {
+export async function authenticateCustomer(rawEmail: string, password: string): Promise<AuthResult | AuthError> {
+  const email = normalizeEmail(rawEmail);
   const customer = await prisma.customer.findUnique({
     where: { email },
   });
@@ -324,8 +354,10 @@ export async function authenticateCustomer(email: string, password: string): Pro
     });
   }
 
+  // `jti` is what the idle-timeout tracker and the logout blacklist key on;
+  // without it neither applies to this session.
   const token = jwt.sign(
-    { id: customer.id, email: customer.email, isAdmin: customer.isAdmin },
+    { id: customer.id, email: customer.email, isAdmin: customer.isAdmin, jti: uuidv4() },
     config.JWT_SECRET,
     { expiresIn: config.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
@@ -339,7 +371,8 @@ export function isAuthError(result: AuthResult | AuthError): result is AuthError
   return 'error' in result;
 }
 
-export async function createOrGetCustomerByEmail(email: string, name?: string): Promise<CustomerWithoutPassword> {
+export async function createOrGetCustomerByEmail(rawEmail: string, name?: string): Promise<CustomerWithoutPassword> {
+  const email = normalizeEmail(rawEmail);
   let customer = await prisma.customer.findUnique({
     where: { email },
   });
@@ -383,7 +416,7 @@ export async function ensureAdminExists(): Promise<void> {
   }
 
   const existingAdmin = await prisma.customer.findUnique({
-    where: { email: config.ADMIN_EMAIL },
+    where: { email: normalizeEmail(config.ADMIN_EMAIL) },
   });
 
   if (existingAdmin) {
@@ -406,7 +439,7 @@ export async function ensureAdminExists(): Promise<void> {
  */
 export async function createPasswordResetToken(email: string): Promise<string | null> {
   const customer = await prisma.customer.findUnique({
-    where: { email },
+    where: { email: normalizeEmail(email) },
   });
 
   // Don't reveal whether the email exists
@@ -486,11 +519,11 @@ export async function resetPassword(token: string, newPassword: string): Promise
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
 
-  // Update password and mark token as used
+  // Update password, clear any lockout, and mark token as used
   await prisma.$transaction([
     prisma.customer.update({
       where: { id: customerId },
-      data: { passwordHash },
+      data: { passwordHash, failedLoginAttempts: 0, lockedUntil: null },
     }),
     prisma.passwordResetToken.update({
       where: { token },
@@ -509,7 +542,8 @@ export async function resetPassword(token: string, newPassword: string): Promise
 /**
  * Send password reset email
  */
-export async function sendPasswordResetEmailToCustomer(email: string, resetToken: string): Promise<boolean> {
+export async function sendPasswordResetEmailToCustomer(rawEmail: string, resetToken: string): Promise<boolean> {
+  const email = normalizeEmail(rawEmail);
   const customer = await prisma.customer.findUnique({
     where: { email },
   });
@@ -518,7 +552,7 @@ export async function sendPasswordResetEmailToCustomer(email: string, resetToken
     return false;
   }
 
-  const appUrl = process.env.APP_URL || 'http://localhost:3000';
+  const appUrl = config.APP_URL || 'http://localhost:3000';
   const resetUrl = `${appUrl}/reset-password.html?token=${resetToken}`;
 
   try {

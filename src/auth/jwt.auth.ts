@@ -18,12 +18,32 @@ import type { AuthProviderInterface, AuthUser } from './index.js';
 export const AUTH_COOKIE_NAME = 'auth_token';
 export const REFRESH_COOKIE_NAME = 'refresh_token';
 
+/**
+ * Parse a jsonwebtoken-style duration ("15m", "12h", "7d", or seconds) to
+ * milliseconds. Falls back to 7 days when the value is unrecognised.
+ */
+export function durationToMs(value: string | number | undefined, fallbackMs = 7 * 24 * 60 * 60 * 1000): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value * 1000;
+  if (typeof value !== 'string') return fallbackMs;
+  const match = value.trim().match(/^(\d+)\s*([smhd])?$/);
+  if (!match) return fallbackMs;
+  const n = parseInt(match[1], 10);
+  const multipliers: Record<string, number> = {
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+  };
+  return n * (multipliers[match[2] || 's'] || 1000);
+}
+
 export const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'strict' as const,
   path: '/',
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+  // Keep the cookie lifetime aligned with the access token lifetime.
+  maxAge: durationToMs(config.JWT_EXPIRES_IN),
 };
 
 export const REFRESH_COOKIE_OPTIONS = {
@@ -127,6 +147,12 @@ export class JWTAuthProvider implements AuthProviderInterface {
     try {
       const decoded = jwt.verify(token, config.JWT_SECRET) as JwtPayload;
 
+      // Refresh tokens are long-lived and only valid at the refresh endpoint;
+      // they must never be accepted as access tokens.
+      if (decoded.type === 'refresh') {
+        return { user: null, error: 'Invalid token type' };
+      }
+
       // Check if token is blacklisted
       const jti = decoded.jti || token.slice(-32); // Use last 32 chars as ID if no jti
       const isBlacklisted = await isTokenBlacklisted(jti);
@@ -187,25 +213,7 @@ export class JWTAuthProvider implements AuthProviderInterface {
     const expiresIn = config.JWT_EXPIRES_IN || '7d';
 
     // Calculate expiration timestamp
-    let expiresAt: number;
-    if (typeof expiresIn === 'string') {
-      const match = expiresIn.match(/^(\d+)([smhd])$/);
-      if (match) {
-        const value = parseInt(match[1], 10);
-        const unit = match[2];
-        const multipliers: Record<string, number> = {
-          s: 1000,
-          m: 60 * 1000,
-          h: 60 * 60 * 1000,
-          d: 24 * 60 * 60 * 1000,
-        };
-        expiresAt = Date.now() + value * (multipliers[unit] || 1000);
-      } else {
-        expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000; // Default 7 days
-      }
-    } else {
-      expiresAt = Date.now() + expiresIn * 1000;
-    }
+    const expiresAt = Date.now() + durationToMs(expiresIn);
 
     const token = jwt.sign(
       { id: user.id, email: user.email, isAdmin: user.isAdmin, jti },

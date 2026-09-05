@@ -88,13 +88,16 @@ export async function createCheckoutSession(input: CreateCheckoutSessionInput): 
   ];
 
   // Build session params
+  const successBase = input.successUrl || config.STRIPE_SUCCESS_URL;
+  const successUrl = `${successBase}${successBase.includes('?') ? '&' : '?'}session_id={CHECKOUT_SESSION_ID}`;
+
   const sessionParams: Stripe.Checkout.SessionCreateParams = {
     mode: isOneTime ? 'payment' : 'subscription',
     payment_method_types: ['card'],
     line_items: lineItems,
     customer: stripeCustomerId,
     customer_email: stripeCustomerId ? undefined : input.customerEmail,
-    success_url: `${input.successUrl || config.STRIPE_SUCCESS_URL}?session_id={CHECKOUT_SESSION_ID}`,
+    success_url: successUrl,
     cancel_url: input.cancelUrl || config.STRIPE_CANCEL_URL,
     billing_address_collection: config.STRIPE_BILLING_ADDRESS_COLLECTION as 'auto' | 'required',
     metadata: {
@@ -144,9 +147,14 @@ export async function createCheckoutSession(input: CreateCheckoutSessionInput): 
     }
   }
 
-  // Add promotion code if provided
+  // Add promotion code if provided. Stripe wants the promotion code *ID*
+  // (promo_...), but customers type the human-readable code, so resolve it.
   if (input.promotionCode) {
-    sessionParams.discounts = [{ promotion_code: input.promotionCode }];
+    const promoId = await resolvePromotionCodeId(input.promotionCode);
+    if (!promoId) {
+      throw new Error('Invalid or expired promotion code');
+    }
+    sessionParams.discounts = [{ promotion_code: promoId }];
   } else {
     sessionParams.allow_promotion_codes = true;
   }
@@ -193,14 +201,33 @@ export async function createBillingPortalSession(customerId: string): Promise<st
 // ============================================================================
 
 export async function handleCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
-  const customerEmail = session.customer_details?.email;
-  const stripeCustomerId = session.customer as string;
+  const customerEmail = session.customer_details?.email?.toLowerCase().trim();
+  const stripeCustomerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
   const productId = session.metadata?.productId;
   const purchaseType = session.metadata?.purchaseType || 'SUBSCRIPTION';
-  const subscriptionId = session.subscription as string | null;
+  const subscriptionId = typeof session.subscription === 'string'
+    ? session.subscription
+    : session.subscription?.id ?? null;
 
   if (!customerEmail || !productId) {
     logger.error('Missing customer email or product ID in checkout session');
+    return;
+  }
+
+  if (!stripeCustomerId) {
+    logger.error('Checkout session has no Stripe customer', { sessionId: session.id });
+    return;
+  }
+
+  // Idempotency: Stripe may deliver checkout.session.completed more than once
+  // (retries, replays from the dashboard). A license already issued for this
+  // session must not be issued again.
+  const alreadyIssued = await prisma.license.findFirst({
+    where: { metadata: { path: ['stripeCheckoutSessionId'], equals: session.id } },
+    select: { id: true },
+  });
+  if (alreadyIssued) {
+    logger.info('Checkout session already fulfilled, skipping', { sessionId: session.id, licenseId: alreadyIssued.id });
     return;
   }
 
@@ -208,6 +235,13 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
   if (!product) {
     logger.error('Product not found:', productId);
     return;
+  }
+
+  // Fetch the Stripe subscription *outside* the DB transaction so a slow
+  // network call cannot hold the interactive transaction open.
+  let stripeSubscription: Stripe.Subscription | null = null;
+  if (purchaseType === 'SUBSCRIPTION' && subscriptionId) {
+    stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
   }
 
   // Use transaction to ensure atomicity of customer/subscription/license creation
@@ -248,27 +282,27 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
     }
 
     // Handle subscription purchases
-    if (purchaseType === 'SUBSCRIPTION' && subscriptionId) {
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-
-      await tx.subscription.upsert({
+    let localSubscriptionId: string | undefined;
+    if (stripeSubscription && subscriptionId) {
+      const upserted = await tx.subscription.upsert({
         where: { stripeSubscriptionId: subscriptionId },
         create: {
           customerId: customer.id,
           stripeSubscriptionId: subscriptionId,
           status: 'ACTIVE',
-          currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-          trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
-          cancelAtPeriodEnd: subscription.cancel_at_period_end,
+          currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+          trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
+          cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
         },
         update: {
           customerId: customer.id, // Ensure customerId is set on update too
           status: 'ACTIVE',
-          currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-          trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
-          cancelAtPeriodEnd: subscription.cancel_at_period_end,
+          currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+          trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
+          cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
         },
       });
+      localSubscriptionId = upserted.id;
     }
 
     // Calculate license expiration
@@ -281,12 +315,17 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session):
       expiresAt = undefined;
     }
 
-    // Create license for the customer
+    // Create license for the customer (inside the same transaction)
     const license = await licenseService.createLicense({
       customerId: customer.id,
       productId: product.id,
+      subscriptionId: localSubscriptionId,
       expiresAt,
-    });
+      metadata: {
+        stripeCheckoutSessionId: session.id,
+        purchaseType,
+      },
+    }, tx);
 
     return { customer, license };
   });
@@ -344,47 +383,48 @@ export async function handleSubscriptionUpdated(subscription: Stripe.Subscriptio
     });
   }
 
-  // Reactivate licenses if subscription is now active
+  // Reactivate the licenses this subscription paid for if it is active again.
+  // Licenses suspended by an admin (or by another subscription) are untouched.
   if (status === 'ACTIVE') {
-    const dbSubscription = await prisma.subscription.findUnique({
-      where: { stripeSubscriptionId },
-    });
-
-    if (dbSubscription) {
-      await prisma.license.updateMany({
-        where: {
-          customerId: dbSubscription.customerId,
-          status: 'SUSPENDED',
-        },
-        data: { status: 'ACTIVE' },
-      });
-    }
+    await licenseService.reactivateLicensesForSubscription(stripeSubscriptionId);
   }
 }
 
 export async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Promise<void> {
   const stripeSubscriptionId = subscription.id;
 
-  await prisma.subscription.update({
+  // updateMany: an unknown subscription must not throw (Stripe would retry
+  // the webhook forever).
+  const updated = await prisma.subscription.updateMany({
     where: { stripeSubscriptionId },
     data: { status: 'CANCELED' },
   });
+
+  if (updated.count === 0) {
+    logger.warn('subscription.deleted for unknown subscription', { stripeSubscriptionId });
+    return;
+  }
 
   await licenseService.expireLicensesForSubscription(stripeSubscriptionId);
 }
 
 export async function handleInvoicePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
-  const subscriptionId = invoice.subscription as string;
-  const stripeCustomerId = invoice.customer as string;
+  const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+  const stripeCustomerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
 
   if (!subscriptionId) {
     return;
   }
 
-  await prisma.subscription.update({
+  const updated = await prisma.subscription.updateMany({
     where: { stripeSubscriptionId: subscriptionId },
     data: { status: 'PAST_DUE' },
   });
+
+  if (updated.count === 0) {
+    logger.warn('invoice.payment_failed for unknown subscription', { subscriptionId });
+    return;
+  }
 
   await licenseService.suspendLicensesForSubscription(subscriptionId);
 
@@ -479,16 +519,40 @@ export async function handleChargeRefunded(charge: Stripe.Charge): Promise<void>
     logger.info(`Recorded refund ${refund.id} for ${refund.amount} ${refund.currency}`);
   }
 
-  // If fully refunded, revoke all active licenses for this customer
+  // If fully refunded, revoke the licenses this charge paid for. Resolve the
+  // scope as narrowly as we can: subscription invoice -> that subscription's
+  // licenses; one-time payment -> the product in the charge metadata; only
+  // fall back to "every active license" when neither can be determined.
   if (isFullRefund) {
-    logger.info(`Full refund processed for customer ${customer.id}, revoking licenses`);
+    let stripeSubscriptionId: string | null = null;
+    if (charge.invoice) {
+      try {
+        const invoiceId = typeof charge.invoice === 'string' ? charge.invoice : charge.invoice.id;
+        const invoice = await stripe.invoices.retrieve(invoiceId);
+        stripeSubscriptionId = typeof invoice.subscription === 'string'
+          ? invoice.subscription
+          : invoice.subscription?.id ?? null;
+      } catch (error) {
+        logger.warn('Could not resolve invoice for refunded charge', {
+          chargeId: charge.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
-    await prisma.license.updateMany({
-      where: {
-        customerId: customer.id,
-        status: 'ACTIVE',
-      },
-      data: { status: 'REVOKED' },
+    const productId = charge.metadata?.productId || null;
+    const revoked = await licenseService.revokeLicensesForRefund({
+      customerId: customer.id,
+      stripeSubscriptionId,
+      productId,
+    });
+
+    logger.info('Full refund processed, licenses revoked', {
+      customerId: customer.id,
+      chargeId: charge.id,
+      stripeSubscriptionId,
+      productId,
+      revoked,
     });
   } else {
     logger.info(`Partial refund of ${refundAmount} cents processed for customer ${customer.id}`);
@@ -531,8 +595,9 @@ export async function handleTrialWillEnd(subscription: Stripe.Subscription): Pro
 
   logger.info(`Trial ending for customer ${customer.id} in ${daysRemaining} days`);
 
-  // Update subscription with trial end info
-  await prisma.subscription.update({
+  // Update subscription with trial end info (updateMany so an unknown
+  // subscription does not turn into a 500 + endless Stripe retries)
+  await prisma.subscription.updateMany({
     where: { stripeSubscriptionId },
     data: {
       trialEnd: trialEndDate,
@@ -649,13 +714,26 @@ export async function reportUsage(input: ReportUsageInput): Promise<{ success: b
 }
 
 /**
- * Get usage records for a subscription
+ * Get usage records for a subscription. When `customerId` is supplied the
+ * subscription must belong to that customer, otherwise an empty list is
+ * returned (portal callers must not be able to read other customers' usage).
  */
 export async function getUsageRecords(subscriptionId: string, options?: {
   startDate?: Date;
   endDate?: Date;
   limit?: number;
+  customerId?: string;
 }) {
+  if (options?.customerId) {
+    const owned = await prisma.subscription.findFirst({
+      where: { id: subscriptionId, customerId: options.customerId },
+      select: { id: true },
+    });
+    if (!owned) {
+      return [];
+    }
+  }
+
   return prisma.usageRecord.findMany({
     where: {
       subscriptionId,
@@ -674,13 +752,13 @@ export async function getUsageRecords(subscriptionId: string, options?: {
 /**
  * Get usage summary from Stripe for a subscription
  */
-export async function getUsageSummary(subscriptionId: string): Promise<{
+export async function getUsageSummary(subscriptionId: string, customerId?: string): Promise<{
   totalUsage: number;
   currentPeriodUsage: number;
   subscriptionItemId: string;
 } | null> {
-  const subscription = await prisma.subscription.findUnique({
-    where: { id: subscriptionId },
+  const subscription = await prisma.subscription.findFirst({
+    where: { id: subscriptionId, ...(customerId ? { customerId } : {}) },
   });
 
   if (!subscription) {
@@ -780,11 +858,12 @@ export async function getSubscriptionsByCustomerId(customerId: string) {
 }
 
 /**
- * Cancel a subscription at period end
+ * Cancel a subscription at period end. When `customerId` is supplied the
+ * subscription must belong to that customer ("not found" otherwise).
  */
-export async function cancelSubscription(subscriptionId: string): Promise<void> {
-  const subscription = await prisma.subscription.findUnique({
-    where: { id: subscriptionId },
+export async function cancelSubscription(subscriptionId: string, customerId?: string): Promise<void> {
+  const subscription = await prisma.subscription.findFirst({
+    where: { id: subscriptionId, ...(customerId ? { customerId } : {}) },
   });
 
   if (!subscription) {
@@ -806,11 +885,12 @@ export async function cancelSubscription(subscriptionId: string): Promise<void> 
 }
 
 /**
- * Reactivate a subscription that was set to cancel
+ * Reactivate a subscription that was set to cancel. When `customerId` is
+ * supplied the subscription must belong to that customer.
  */
-export async function reactivateSubscription(subscriptionId: string): Promise<void> {
-  const subscription = await prisma.subscription.findUnique({
-    where: { id: subscriptionId },
+export async function reactivateSubscription(subscriptionId: string, customerId?: string): Promise<void> {
+  const subscription = await prisma.subscription.findFirst({
+    where: { id: subscriptionId, ...(customerId ? { customerId } : {}) },
   });
 
   if (!subscription) {
@@ -1045,6 +1125,19 @@ export async function updatePromotionCode(promoCodeId: string, data: {
 }): Promise<Stripe.PromotionCode> {
   const idempotencyKey = generateIdempotencyKey('update-promo', promoCodeId);
   return stripe.promotionCodes.update(promoCodeId, data, { idempotencyKey });
+}
+
+/**
+ * Resolve a human-readable promotion code (or an already-resolved promo_ ID)
+ * to the Stripe promotion code ID that Checkout expects. Returns null when
+ * the code is unknown, inactive, expired or exhausted.
+ */
+export async function resolvePromotionCodeId(code: string): Promise<string | null> {
+  if (code.startsWith('promo_')) {
+    return code;
+  }
+  const result = await validatePromotionCode(code);
+  return result.valid && result.promotionCode ? result.promotionCode.id : null;
 }
 
 /**

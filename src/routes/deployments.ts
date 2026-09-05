@@ -15,6 +15,7 @@ import { prisma } from '../config/database.js';
 import { DeploymentStatus } from '@prisma/client';
 import { logger } from '../services/logger.service.js';
 import { config } from '../config/index.js';
+import { requireApiKey } from '../utils/apiKey.js';
 
 const router = express.Router();
 
@@ -64,14 +65,25 @@ function signHeartbeatResponse(payload: Record<string, unknown>, secret: string)
 // Signature Verification
 // ============================================================================
 
-function verifySignature(payload: string, signature: string, secret: string): boolean {
+function verifySignature(payload: string, signature: string | undefined, secret: string): boolean {
   if (!secret || signature === 'unsigned') {
     // In dev/testing, allow unsigned requests
     return config.NODE_ENV !== 'production';
   }
 
+  if (typeof signature !== 'string' || signature.length === 0) {
+    return false;
+  }
+
   const expectedSignature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+  const presented = Buffer.from(signature);
+  const expected = Buffer.from(expectedSignature);
+  // timingSafeEqual throws on length mismatch; a wrong-length signature is
+  // simply invalid (and must not fall through to the "dev mode" catch).
+  if (presented.length !== expected.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(presented, expected);
 }
 
 // ============================================================================
@@ -87,7 +99,7 @@ function verifySignature(payload: string, signature: string, secret: string): bo
 router.post('/validate', async (req, res) => {
   try {
     const fingerprint = (req.body || {}) as DeploymentFingerprint;
-    const signature = req.headers['x-deployment-signature'] as string;
+    const signature = req.headers['x-deployment-signature'] as string | undefined;
     // Header takes precedence; fall back to body so callers that only send
     // the signed fingerprint (which already contains deploymentId) work too.
     const deploymentId = (req.headers['x-deployment-id'] as string) || fingerprint.deploymentId;
@@ -342,6 +354,21 @@ router.post('/heartbeat', async (req, res) => {
       });
     }
 
+    // If the client signed the heartbeat, the signature must verify. (The
+    // documented heartbeat contract does not require a signature, so an
+    // unsigned heartbeat from a registered deployment is still accepted.)
+    const heartbeatSignature = req.headers['x-deployment-signature'] as string | undefined;
+    if (deployment.secret && heartbeatSignature && heartbeatSignature !== 'unsigned') {
+      if (!verifySignature(JSON.stringify(req.body || {}), heartbeatSignature, deployment.secret)) {
+        logger.warn('Invalid signature on deployment heartbeat', { deploymentId });
+        return res.status(401).json(signHeartbeatResponse({
+          action: 'warn',
+          reason: 'INVALID_SIGNATURE',
+          _did: deploymentId,
+        }, deployment.secret));
+      }
+    }
+
     // Check for kill flag
     if (deployment.status === 'KILL') {
       const response = {
@@ -408,23 +435,22 @@ router.post('/heartbeat', async (req, res) => {
  * Admin endpoint to remotely kill a deployment.
  * The deployment will receive the kill signal on next heartbeat or validation.
  */
-router.post('/:id/kill', async (req, res) => {
-  // TODO: Add admin authentication
-  const apiKey = req.headers['x-api-key'];
-  if (apiKey !== config.ADMIN_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
+router.post('/:id/kill', requireApiKey, async (req, res) => {
   try {
     const { id } = req.params;
-    const { reason, message } = req.body;
+    const { reason, message } = req.body || {};
+
+    const existing = await prisma.deployment.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Deployment not found' });
+    }
 
     const deployment = await prisma.deployment.update({
       where: { id },
       data: {
         status: 'KILL',
-        killReason: reason || 'ADMIN_KILL',
-        killMessage: message,
+        killReason: typeof reason === 'string' ? reason.slice(0, 200) : 'ADMIN_KILL',
+        killMessage: typeof message === 'string' ? message.slice(0, 1000) : undefined,
         killedAt: new Date(),
       },
     });
@@ -459,20 +485,35 @@ router.post('/:id/kill', async (req, res) => {
  *
  * Admin endpoint to register a new authorized deployment.
  */
-router.post('/register', async (req, res) => {
-  const apiKey = req.headers['x-api-key'];
-  if (apiKey !== config.ADMIN_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
+router.post('/register', requireApiKey, async (req, res) => {
   try {
     const { deploymentId, productId, customerId, licenseId, environment, secret } = req.body || {};
 
-    if (!deploymentId) {
+    if (!deploymentId || typeof deploymentId !== 'string') {
       return res.status(400).json({ error: 'deploymentId is required' });
     }
-    if (!productId) {
+    if (!productId || typeof productId !== 'string') {
       return res.status(400).json({ error: 'productId is required (CUID or slug)' });
+    }
+
+    const existing = await prisma.deployment.findUnique({ where: { id: deploymentId }, select: { id: true } });
+    if (existing) {
+      return res.status(409).json({ error: `Deployment already registered: ${deploymentId}` });
+    }
+
+    // Validate optional foreign keys up front so a typo yields a 404 rather
+    // than a Prisma constraint error surfacing as a 500.
+    if (customerId) {
+      const customer = await prisma.customer.findUnique({ where: { id: String(customerId) }, select: { id: true } });
+      if (!customer) {
+        return res.status(404).json({ error: `Customer not found: ${customerId}` });
+      }
+    }
+    if (licenseId) {
+      const license = await prisma.license.findUnique({ where: { id: String(licenseId) }, select: { id: true } });
+      if (!license) {
+        return res.status(404).json({ error: `License not found: ${licenseId}` });
+      }
     }
 
     // Accept either a product CUID or slug — admins typically know the slug
@@ -529,14 +570,14 @@ router.post('/register', async (req, res) => {
  *
  * Admin endpoint to list all deployments.
  */
-router.get('/', async (req, res) => {
-  const apiKey = req.headers['x-api-key'];
-  if (apiKey !== config.ADMIN_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
+router.get('/', requireApiKey, async (req, res) => {
   try {
     const { status, productId } = req.query;
+
+    const validStatuses = Object.values(DeploymentStatus) as string[];
+    if (status && !validStatuses.includes(String(status))) {
+      return res.status(400).json({ error: `Invalid status. Expected one of: ${validStatuses.join(', ')}` });
+    }
 
     const deployments = await prisma.deployment.findMany({
       where: {
@@ -577,14 +618,12 @@ router.get('/', async (req, res) => {
  *
  * Given a watermark found in leaked code, identify the source deployment.
  */
-router.post('/watermark/identify', async (req, res) => {
-  const apiKey = req.headers['x-api-key'];
-  if (apiKey !== config.ADMIN_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
+router.post('/watermark/identify', requireApiKey, async (req, res) => {
   try {
-    const { watermark } = req.body;
+    const { watermark } = req.body || {};
+    if (typeof watermark !== 'string' || watermark.length === 0) {
+      return res.status(400).json({ error: 'watermark is required' });
+    }
 
     // Get all deployments with their secrets
     const deployments = await prisma.deployment.findMany({

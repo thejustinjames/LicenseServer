@@ -106,26 +106,58 @@ export async function validateDesktopLicense(
       },
     });
   } else {
-    // Check if we can create new activation
-    if (license.activations.length >= license.maxActivations) {
+    // Seat check + insert must be atomic (see license.service.activateLicense):
+    // lock the license row and re-count inside the transaction so two
+    // desktops activating at once cannot both take the last seat.
+    const created = await prisma.$transaction(async (tx) => {
+      await licenseService.lockLicenseRow(tx, license.id);
+
+      const existing = await tx.licenseActivation.findUnique({
+        where: {
+          licenseId_machineFingerprint: {
+            licenseId: license.id,
+            machineFingerprint: input.machineFingerprint,
+          },
+        },
+      });
+      if (existing) {
+        return tx.licenseActivation.update({
+          where: { id: existing.id },
+          data: {
+            lastSeenAt: new Date(),
+            lastCheckIn: new Date(),
+            platform: platformEnum,
+            appVersion: input.appVersion,
+            osVersion: input.osVersion,
+          },
+        });
+      }
+
+      const count = await tx.licenseActivation.count({ where: { licenseId: license.id } });
+      if (count >= license.maxActivations) {
+        return null;
+      }
+
+      return tx.licenseActivation.create({
+        data: {
+          licenseId: license.id,
+          machineFingerprint: input.machineFingerprint,
+          platform: platformEnum,
+          appVersion: input.appVersion,
+          osVersion: input.osVersion,
+          lastCheckIn: new Date(),
+        },
+      });
+    });
+
+    if (!created) {
       return {
         valid: false,
         error: 'Maximum activations reached',
         checkInDays: 0,
       };
     }
-
-    // Create new activation
-    activation = await prisma.licenseActivation.create({
-      data: {
-        licenseId: license.id,
-        machineFingerprint: input.machineFingerprint,
-        platform: platformEnum,
-        appVersion: input.appVersion,
-        osVersion: input.osVersion,
-        lastCheckIn: new Date(),
-      },
-    });
+    activation = created;
   }
 
   // Get offline grace days from product or use default
@@ -133,7 +165,7 @@ export async function validateDesktopLicense(
     where: { id: license.productId },
   });
 
-  const offlineGraceDays = product?.offlineGraceDays || 7;
+  const offlineGraceDays = licenseService.offlineGraceDaysFor(product);
   const checkInIntervalDays = product?.checkInIntervalDays || 7;
 
   // Generate offline token
@@ -218,7 +250,7 @@ export async function checkIn(input: CheckInInput): Promise<CheckInResult> {
     where: { id: license.productId },
   });
 
-  const offlineGraceDays = product?.offlineGraceDays || 7;
+  const offlineGraceDays = licenseService.offlineGraceDaysFor(product);
   const checkInIntervalDays = product?.checkInIntervalDays || 7;
 
   // Generate new offline token

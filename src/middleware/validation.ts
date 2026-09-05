@@ -16,9 +16,28 @@ export function isValidUUID(value: string): boolean {
  */
 export const uuidSchema = z.string().regex(UUID_REGEX, 'Invalid UUID format');
 
+// Primary keys default to UUIDs, but seeded / externally-provisioned rows
+// (products such as "prod_agencio_predict_lab", deployments) use opaque
+// string ids. Accept either: a UUID or a short, URL-safe identifier.
+const RESOURCE_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
 /**
- * Middleware to validate :id parameter is a valid UUID
- * Returns 400 Bad Request if the ID is not a valid UUID
+ * True for a UUID v4 or an opaque URL-safe identifier (letters, digits,
+ * `.`, `_`, `:`, `-`; 1-128 chars). Rejects path separators, whitespace and
+ * anything that could be mistaken for an injected fragment.
+ */
+export function isValidResourceId(value: string): boolean {
+  return isValidUUID(value) || RESOURCE_ID_REGEX.test(value);
+}
+
+/**
+ * Zod schema for a resource id (UUID or opaque identifier)
+ */
+export const resourceIdSchema = z.string().regex(RESOURCE_ID_REGEX, 'Invalid ID format');
+
+/**
+ * Middleware to validate :id parameter is a well-formed resource id
+ * Returns 400 Bad Request otherwise
  */
 export function validateIdParam(req: Request, res: Response, next: NextFunction): void {
   const id = req.params.id;
@@ -28,8 +47,8 @@ export function validateIdParam(req: Request, res: Response, next: NextFunction)
     return;
   }
 
-  if (!isValidUUID(id)) {
-    res.status(400).json({ error: 'Invalid ID format. Expected UUID.' });
+  if (!isValidResourceId(id)) {
+    res.status(400).json({ error: 'Invalid ID format.' });
     return;
   }
 
@@ -37,7 +56,8 @@ export function validateIdParam(req: Request, res: Response, next: NextFunction)
 }
 
 /**
- * Middleware factory to validate a specific parameter is a valid UUID
+ * Middleware factory to validate a specific parameter is a well-formed
+ * resource id (UUID or opaque identifier)
  */
 export function validateUUIDParam(paramName: string) {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -48,8 +68,8 @@ export function validateUUIDParam(paramName: string) {
       return;
     }
 
-    if (!isValidUUID(value)) {
-      res.status(400).json({ error: `Invalid ${paramName} format. Expected UUID.` });
+    if (!isValidResourceId(value)) {
+      res.status(400).json({ error: `Invalid ${paramName} format.` });
       return;
     }
 

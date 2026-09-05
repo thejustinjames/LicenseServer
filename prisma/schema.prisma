@@ -182,6 +182,13 @@ model License {
   // narrowly-scoped test license that only enables `cortex` + `dashboard`.
   enabledComponents String[] @default([]) @map("enabled_components")
 
+  // Stripe subscription that issued this license (null for one-time /
+  // admin-issued / quote-converted licenses). Lets subscription webhooks
+  // expire, suspend or reactivate only the licenses they actually paid for
+  // rather than every license the customer owns.
+  subscriptionId String?       @map("subscription_id")
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
   // Parent license for seat assignments (organization master license)
   parentLicenseId String?   @map("parent_license_id")
   parentLicense   License?  @relation("SeatHierarchy", fields: [parentLicenseId], references: [id])
@@ -199,6 +206,7 @@ model License {
   @@index([status])
   @@index([licenseType])
   @@index([parentLicenseId])
+  @@index([subscriptionId])
   @@map("licenses")
 }
 
@@ -215,6 +223,7 @@ model Subscription {
 
   customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   usageRecords UsageRecord[]
+  licenses     License[]
 
   @@index([customerId])
   @@map("subscriptions")

@@ -95,6 +95,12 @@ const envSchema = z.object({
   // Request Configuration
   REQUEST_TIMEOUT_MS: z.string().default('30000'),
   REQUEST_BODY_LIMIT: z.string().default('10mb'),
+  // Express "trust proxy" setting. Behind nginx / an ALB / a K8s ingress the
+  // app only ever sees the proxy's address unless this is set, which breaks
+  // per-IP rate limiting and lockout (every client shares one bucket) and
+  // makes `secure` cookies unusable. Accepts the values Express accepts:
+  // "false", "true", a hop count ("1"), or a list of trusted CIDRs/names.
+  TRUST_PROXY: z.string().default('false'),
 
   // Session idle timeout (warns at SESSION_IDLE_WARN_MS, signs out at
   // SESSION_IDLE_TIMEOUT_MS). Frontend reads SESSION_IDLE_* via /api/auth/idle-config.

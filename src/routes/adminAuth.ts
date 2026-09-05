@@ -238,7 +238,9 @@ function handleError(res: Response, err: unknown, op: string) {
       res.status(401).json({ error: 'Invalid credentials', code: e.name });
       return;
     case 'UserNotFoundException':
-      res.status(404).json({ error: 'User not found', code: e.name });
+      // Same response as a bad password so the admin login cannot be used
+      // to enumerate staff accounts.
+      res.status(401).json({ error: 'Invalid credentials', code: 'NotAuthorizedException' });
       return;
     case 'TooManyRequestsException':
     case 'LimitExceededException':

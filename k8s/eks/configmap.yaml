@@ -12,6 +12,8 @@ data:
   NODE_ENV: "production"
   PORT: "3030"
   LOG_LEVEL: "info"
+  # Behind the ALB ingress: trust one proxy hop so req.ip is the client IP.
+  TRUST_PROXY: "1"
 
   # AWS Secrets Manager - Runtime secrets injection
   USE_AWS_SECRETS_MANAGER: "true"
