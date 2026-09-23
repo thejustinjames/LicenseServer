@@ -56,6 +56,15 @@ export function detectRuntimeEnvironment(): RuntimeEnvironment {
 }
 
 /**
+ * Endpoint override for the Cognito Identity Provider API. Unset in AWS; set
+ * to a Cognito emulator (e.g. http://silo-cognito:9080 in the SILO lab) to
+ * send every Cognito call there instead.
+ */
+export function cognitoEndpoint(): string | undefined {
+  return process.env.COGNITO_ENDPOINT || undefined;
+}
+
+/**
  * Get AWS credentials using the appropriate provider chain
  */
 export function getAWSCredentials(): AwsCredentialIdentityProvider | undefined {

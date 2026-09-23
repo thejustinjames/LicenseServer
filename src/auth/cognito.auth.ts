@@ -11,6 +11,7 @@
 
 import { Response, NextFunction } from 'express';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
+import jwt from 'jsonwebtoken';
 import type { AuthenticatedRequest } from '../types/index.js';
 import type { AuthProviderInterface, AuthUser } from './index.js';
 import { logger } from '../services/logger.service.js';
@@ -51,7 +52,38 @@ interface CognitoIdTokenPayload {
 
 type CognitoTokenPayload = CognitoAccessTokenPayload | CognitoIdTokenPayload;
 
-type Verifier = ReturnType<typeof CognitoJwtVerifier.create>;
+interface Verifier {
+  verify(token: string): Promise<unknown>;
+}
+
+/**
+ * Verifier for a Cognito emulator (the SILO lab's silo-cognito). The emulator
+ * signs with a shared HS256 secret and serves no JWKS, so aws-jwt-verify
+ * cannot check its tokens. This applies the same checks by hand: signature,
+ * expiry, the Cognito-format issuer for the pool, token_use, and the client
+ * id (`client_id` on access tokens, `aud` on id tokens).
+ */
+function emulatorVerifier(
+  secret: string,
+  region: string,
+  userPoolId: string,
+  clientIds: string[],
+): Verifier {
+  const issuer = `https://cognito-idp.${region}.amazonaws.com/${userPoolId}`;
+  return {
+    async verify(token: string) {
+      const payload = jwt.verify(token, secret, { algorithms: ['HS256'], issuer }) as jwt.JwtPayload;
+      if (payload.token_use !== 'access' && payload.token_use !== 'id') {
+        throw new Error(`Unexpected token_use: ${payload.token_use}`);
+      }
+      const client = payload.token_use === 'access' ? payload.client_id : payload.aud;
+      if (typeof client !== 'string' || !clientIds.includes(client)) {
+        throw new Error('Token was not issued to an accepted client');
+      }
+      return payload;
+    },
+  };
+}
 
 export class CognitoAuthProvider implements AuthProviderInterface {
   private staffVerifier: Verifier | null = null;
@@ -83,6 +115,30 @@ export class CognitoAuthProvider implements AuthProviderInterface {
       .split(',').map((s) => s.trim()).filter(Boolean);
     this.extraCustomerClientIds = (process.env.CUSTOMER_COGNITO_SERVER_CLIENT_ID || '')
       .split(',').map((s) => s.trim()).filter(Boolean);
+  }
+
+  /**
+   * The staff or customer verifier. With COGNITO_EMULATOR_JWT_SECRET set,
+   * tokens are checked against that secret instead of the pool's JWKS.
+   */
+  private async createVerifier(userPoolId: string, clientIds: string[]): Promise<Verifier> {
+    const emulatorSecret = process.env.COGNITO_EMULATOR_JWT_SECRET;
+    if (emulatorSecret) {
+      if (!process.env.COGNITO_ENDPOINT) {
+        throw new Error('COGNITO_EMULATOR_JWT_SECRET requires COGNITO_ENDPOINT to point at the emulator');
+      }
+      logger.warn(
+        `Cognito emulator mode: verifying HS256 tokens for pool ${userPoolId} with a shared secret. Never use against real Cognito.`,
+      );
+      return emulatorVerifier(emulatorSecret, this.region, userPoolId, clientIds);
+    }
+    const verifier = CognitoJwtVerifier.create({
+      userPoolId,
+      tokenUse: null as unknown as 'access',
+      clientId: clientIds.length === 1 ? clientIds[0] : clientIds,
+    } as never);
+    await verifier.hydrate();
+    return verifier;
   }
 
   private async verifyWithEither(token: string): Promise<{ payload: CognitoTokenPayload; pool: 'staff' | 'customer' } | null> {
@@ -247,12 +303,7 @@ export class CognitoAuthProvider implements AuthProviderInterface {
         throw new Error('COGNITO_CLIENT_ID is required when COGNITO_USER_POOL_ID is set');
       }
       const staffClientIds = [this.clientId, ...this.extraStaffClientIds];
-      this.staffVerifier = CognitoJwtVerifier.create({
-        userPoolId: this.userPoolId,
-        tokenUse: null as unknown as 'access',
-        clientId: staffClientIds.length === 1 ? staffClientIds[0] : staffClientIds,
-      } as never);
-      await this.staffVerifier.hydrate();
+      this.staffVerifier = await this.createVerifier(this.userPoolId, staffClientIds);
       logger.info(
         `Cognito staff verifier initialized for pool ${this.userPoolId} (${staffClientIds.length} clients)`,
       );
@@ -265,12 +316,7 @@ export class CognitoAuthProvider implements AuthProviderInterface {
         );
       }
       const customerClientIds = [this.customerClientId, ...this.extraCustomerClientIds];
-      this.customerVerifier = CognitoJwtVerifier.create({
-        userPoolId: this.customerPoolId,
-        tokenUse: null as unknown as 'access',
-        clientId: customerClientIds.length === 1 ? customerClientIds[0] : customerClientIds,
-      } as never);
-      await this.customerVerifier.hydrate();
+      this.customerVerifier = await this.createVerifier(this.customerPoolId, customerClientIds);
       logger.info(
         `Cognito customer verifier initialized for pool ${this.customerPoolId} (${customerClientIds.length} clients)`,
       );
@@ -285,11 +331,12 @@ export class CognitoAuthProvider implements AuthProviderInterface {
   async getUserFromCognito(username: string): Promise<Record<string, string> | null> {
     try {
       const { CognitoIdentityProviderClient, AdminGetUserCommand } = await import('@aws-sdk/client-cognito-identity-provider');
-      const { getAWSCredentials } = await import('../config/aws.js');
+      const { cognitoEndpoint, getAWSCredentials } = await import('../config/aws.js');
 
       const client = new CognitoIdentityProviderClient({
         region: this.region,
         credentials: getAWSCredentials(),
+        endpoint: cognitoEndpoint(),
       });
 
       const response = await client.send(new AdminGetUserCommand({
@@ -317,11 +364,12 @@ export class CognitoAuthProvider implements AuthProviderInterface {
   async getUserGroups(username: string): Promise<string[]> {
     try {
       const { CognitoIdentityProviderClient, AdminListGroupsForUserCommand } = await import('@aws-sdk/client-cognito-identity-provider');
-      const { getAWSCredentials } = await import('../config/aws.js');
+      const { cognitoEndpoint, getAWSCredentials } = await import('../config/aws.js');
 
       const client = new CognitoIdentityProviderClient({
         region: this.region,
         credentials: getAWSCredentials(),
+        endpoint: cognitoEndpoint(),
       });
 
       const response = await client.send(new AdminListGroupsForUserCommand({

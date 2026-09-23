@@ -36,7 +36,7 @@ import {
   type ChallengeNameType,
   type AttributeType,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { getAWSCredentials } from '../config/aws.js';
+import { cognitoEndpoint, getAWSCredentials } from '../config/aws.js';
 import { logger } from './logger.service.js';
 
 export interface CustomerSignupInput {
@@ -114,6 +114,7 @@ function getClient() {
     client = new CognitoIdentityProviderClient({
       region: region(),
       credentials: getAWSCredentials(),
+      endpoint: cognitoEndpoint(),
     });
   }
   return client;
