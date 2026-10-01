@@ -4,6 +4,7 @@ import { validationRateLimit } from '../middleware/rateLimit.js';
 import * as licenseService from '../services/license.service.js';
 import * as agentService from '../services/agent.service.js';
 import * as crlService from '../services/crl.service.js';
+import * as licenceCrlService from '../services/licence-crl.service.js';
 import * as entitlementService from '../services/entitlement.service.js';
 import { prisma } from '../config/database.js';
 import { isMtlsCaEnabled } from '../services/ca.service.js';
@@ -204,6 +205,43 @@ router.get('/agents/crl', async (_req: Request, res: Response) => {
   } catch (error) {
     logger.error('CRL build error:', error);
     res.status(500).json({ error: 'CRL build failed' });
+  }
+});
+
+// Licence revocation list — fetched periodically by every Cortex.
+//
+// Public on purpose, and it carries no secrets: licences are listed by the
+// SHA-256 of the key, never the key, because every Cortex in every estate
+// fetches this and publishing keys would hand each of them all the others.
+//
+// It is **not** the authority and is deliberately unsigned. A Cortex that
+// finds its own fingerprint here calls POST /validate, which is authenticated
+// by the key itself and carries the reason; the list only says "worth asking
+// now". That caps the damage from a forged list at one extra validate call.
+// See services/licence-crl.service.ts.
+router.get('/licenses/crl', async (_req: Request, res: Response) => {
+  try {
+    const crl = await licenceCrlService.buildLicenceCrl();
+    res.set('Cache-Control', `public, max-age=${licenceCrlService.CRL_MAX_AGE_SECONDS}`);
+    res.set('X-CRL-Revoked-Count', String(crl.count));
+    res.set('X-CRL-Next-Update', crl.next_update_at);
+    res.json(crl);
+  } catch (error) {
+    logger.error('licence CRL build error:', error);
+    res.status(500).json({ error: 'licence CRL build failed' });
+  }
+});
+
+// British spelling too. A 404 on a revocation list reads as "this server has
+// no revocation", which is the one thing it must never be mistaken for.
+router.get('/licences/crl', async (_req: Request, res: Response) => {
+  try {
+    const crl = await licenceCrlService.buildLicenceCrl();
+    res.set('Cache-Control', `public, max-age=${licenceCrlService.CRL_MAX_AGE_SECONDS}`);
+    res.json(crl);
+  } catch (error) {
+    logger.error('licence CRL build error:', error);
+    res.status(500).json({ error: 'licence CRL build failed' });
   }
 });
 

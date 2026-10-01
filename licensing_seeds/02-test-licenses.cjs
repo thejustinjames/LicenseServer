@@ -43,6 +43,11 @@ const customers = {
   pro:        { email: 'qa-pro@licenseserver.test',        name: 'QA Tester (Professional)' },
   business:   { email: 'qa-business@licenseserver.test',   name: 'QA Tester (Business)' },
   enterprise: { email: 'qa-enterprise@licenseserver.test', name: 'QA Tester (Enterprise)' },
+  // The child Cortex is a separate installation with a separate licence, so
+  // it gets its own key. Kept under the enterprise customer because a child
+  // is bought by the same organisation as its parent.
+  child:      { email: 'qa-child@licenseserver.test',      name: 'QA Tester (Child Cortex)' },
+  seats:      { email: 'qa-seats@licenseserver.test',      name: 'QA Tester (Agent seats)' },
 };
 
 // License spec, indexed by product name.
@@ -51,6 +56,9 @@ const spec = {
   'SILO Standalone Professional': { customer: 'pro',        maxActivations: 1, seatCount: 1  },
   'SILO Cortex Business':         { customer: 'business',   maxActivations: 2, seatCount: 5  },
   'SILO Cortex Enterprise':       { customer: 'enterprise', maxActivations: 2, seatCount: 10 },
+  'SILO Child Cortex Business':   { customer: 'child',      maxActivations: 2, seatCount: 5  },
+  'SILO Child Cortex Enterprise': { customer: 'child',      maxActivations: 2, seatCount: 10 },
+  'SILO Agent Seat Pack':         { customer: 'seats',      maxActivations: 1, seatCount: 10 },
 };
 
 // Match the real key format from src/utils/license-key.ts: four 4-char
