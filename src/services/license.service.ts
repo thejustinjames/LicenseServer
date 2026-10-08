@@ -1,4 +1,5 @@
 import { prisma } from '../config/database.js';
+import { effectiveFeatures } from './addon.service.js';
 import { License, LicenseStatus, LicenseActivation, Prisma } from '@prisma/client';
 import { generateLicenseKey, validateLicenseKeyFormat } from '../utils/license-key.js';
 import { generateOfflineLicenseToken } from '../utils/crypto.js';
@@ -218,7 +219,9 @@ export async function validateLicense(
     valid: true,
     product: license.product.name,
     expiresAt: license.expiresAt?.toISOString(),
-    features: license.product.features,
+    // The product's codes, the licence's active add-ons, and for a child
+    // Cortex its parent's (addon.service.ts).
+    features: await effectiveFeatures(license),
     components,
   };
 }
@@ -371,7 +374,7 @@ export async function generateOfflineLicense(licenseId: string): Promise<string 
     licenseId: license.id,
     productId: license.product.id,
     customerId: license.customer.id,
-    features: license.product.features,
+    features: await effectiveFeatures(license),
     expiresAt: license.expiresAt?.toISOString() || null,
     issuedAt: new Date().toISOString(),
     gracePeriodDays: offlineGraceDaysFor(license.product),

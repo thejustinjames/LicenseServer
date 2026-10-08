@@ -15,6 +15,8 @@ needing the TypeScript toolchain.
 |---|---|
 | `01-test-skus.cjs` | The four test SKUs we ship for QA: Standalone Home, Standalone Professional, Cortex Business, Cortex Enterprise. |
 | `02-test-licenses.cjs` | One sample license per SKU, keyed against tier-specific QA customers. Activations + seat counts per the policy below. Run **after** `01-test-skus.cjs`. |
+| `03-silo-licence-scopes.cjs` | Gives every SILO SKU a scope code (`scope-cortex`, `scope-child-cortex`, `scope-agent`) and adds the Child Cortex SKUs and the agent seat pack. |
+| `04-silo-causal-trust-addon.cjs` | The causal trust add-on as a licence add-on (`license_add_ons`): granted to each Cortex Enterprise licence, child Enterprise licences linked to their parent so it covers them, and `causal_trust` removed from any product. Cortex-only, Enterprise only; see `src/services/addon.service.ts`. Needs `prisma/sql/2026-10-08-license-add-ons.sql`. |
 
 ## Activation + seat policy applied by `02-test-licenses.cjs`
 

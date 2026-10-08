@@ -21,6 +21,9 @@ vi.mock('../../src/config/database.js', () => {
     product: {
       findUnique: vi.fn(),
     },
+    licenseAddOn: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     subscription: {
       findUnique: vi.fn(),
     },
@@ -51,6 +54,7 @@ import * as licenseService from '../../src/services/license.service.js';
 describe('License Service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (prisma.licenseAddOn.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   describe('createLicense', () => {

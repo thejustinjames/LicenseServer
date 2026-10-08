@@ -13,6 +13,7 @@ import * as paymentService from '../services/payment.service.js';
 import * as storageService from '../services/storage.service.js';
 import * as seatService from '../services/seat.service.js';
 import * as entitlementService from '../services/entitlement.service.js';
+import * as addOnService from '../services/addon.service.js';
 import * as quoteService from '../services/quote.service.js';
 import * as desktopService from '../services/desktop.service.js';
 import * as crlService from '../services/crl.service.js';
@@ -565,6 +566,102 @@ router.post('/licenses/:id/packs/:packId/revoke', validateIdParam, validateUUIDP
     logger.error('revoke pack error:', error);
     const msg = error instanceof Error ? error.message : 'Unknown';
     res.status(400).json({ error: msg });
+  }
+});
+
+// =============================================================================
+// Licence add-ons (the SILO causal trust add-on). Cortex-only, Enterprise only,
+// granted to the parent Cortex; a linked child Cortex inherits it.
+// =============================================================================
+
+const grantAddOnSchema = z.object({
+  code: z.enum(addOnService.ADD_ON_CODES),
+  purchase_order_ref: z.string().max(255).optional(),
+  expires_at: z.string().datetime().optional(),
+  notes: z.string().max(1000).optional(),
+});
+
+router.post('/licenses/:id/add-ons', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = grantAddOnSchema.parse(req.body);
+    const row = await addOnService.grantAddOn({
+      licenseId: req.params.id,
+      code: data.code,
+      grantedBy: req.user?.id,
+      purchaseOrderRef: data.purchase_order_ref,
+      expiresAt: data.expires_at ? new Date(data.expires_at) : undefined,
+      notes: data.notes,
+    });
+    res.status(201).json(row);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid request', details: error.errors });
+      return;
+    }
+    logger.error('grant add-on error:', error);
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+router.get('/licenses/:id/add-ons', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const license = await prisma.license.findUnique({
+      where: { id: req.params.id },
+      include: { product: { select: { features: true } } },
+    });
+    if (!license) {
+      res.status(404).json({ error: 'License not found' });
+      return;
+    }
+    const addOns = await prisma.licenseAddOn.findMany({
+      where: { licenseId: req.params.id },
+      orderBy: { grantedAt: 'desc' },
+    });
+    // What validation will hand Cortex, including anything inherited.
+    const features = await addOnService.effectiveFeatures(license);
+    res.json({ add_ons: addOns, parent_license_id: license.parentLicenseId, effective_features: features });
+  } catch (error) {
+    logger.error('list add-ons error:', error);
+    res.status(500).json({ error: 'Failed to list add-ons' });
+  }
+});
+
+router.post('/licenses/:id/add-ons/:addOnId/revoke', validateIdParam, validateUUIDParam('addOnId'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const row = await prisma.licenseAddOn.findUnique({
+      where: { id: req.params.addOnId },
+      select: { licenseId: true },
+    });
+    if (!row || row.licenseId !== req.params.id) {
+      res.status(404).json({ error: 'Add-on not found for this license' });
+      return;
+    }
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : undefined;
+    res.json(await addOnService.revokeAddOn(req.params.addOnId, reason));
+  } catch (error) {
+    logger.error('revoke add-on error:', error);
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+const setParentSchema = z.object({
+  parent_license_id: z.string().uuid().nullable(),
+});
+
+// Link a child Cortex licence to its parent (or unlink with null), so the
+// parent's add-ons cover it.
+router.put('/licenses/:id/parent', validateIdParam, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = setParentSchema.parse(req.body);
+    const updated = await addOnService.setParent(req.params.id, data.parent_license_id);
+    res.json({ id: updated.id, parent_license_id: updated.parentLicenseId });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Invalid request', details: error.errors });
+      return;
+    }
+    logger.error('set parent error:', error);
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown' });
   }
 });
 
