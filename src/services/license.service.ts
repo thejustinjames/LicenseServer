@@ -241,7 +241,7 @@ export async function activateLicense(
   machineFingerprint: string,
   machineName?: string,
   ipAddress?: string
-): Promise<{ success: boolean; activation?: LicenseActivation; error?: string }> {
+): Promise<{ success: boolean; activation?: LicenseActivation; error?: string; product?: string }> {
   const license = await getLicenseByKey(licenseKey);
 
   if (!license) {
@@ -265,7 +265,7 @@ export async function activateLicense(
       where: { id: existingActivation.id },
       data: { lastSeenAt: new Date(), ipAddress },
     });
-    return { success: true, activation: updated };
+    return { success: true, activation: updated, product: license.product.name };
   }
 
   // Seat-limit check and insert must be atomic: lock the license row, then
@@ -318,7 +318,7 @@ export async function activateLicense(
     });
   }
 
-  return { success: true, activation: result.activation };
+  return { success: true, activation: result.activation, product: license.product.name };
 }
 
 export async function deactivateLicense(

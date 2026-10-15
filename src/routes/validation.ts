@@ -113,6 +113,7 @@ router.post('/activate', async (req: Request, res: Response) => {
 
     res.json({
       success: true,
+      product: result.product,
       activation: {
         machineFingerprint: result.activation?.machineFingerprint,
         activatedAt: result.activation?.activatedAt,
