@@ -21,6 +21,9 @@ const products = [
     purchaseType: 'SUBSCRIPTION' as const,
     pricingType: 'FIXED' as const,
     validationMode: 'HYBRID' as const,
+    // Placeholder prices, USD cents: change them in the admin UI (Products) when the offer is set.
+    priceMonthly: 49900,
+    priceAnnual: 499000,
     licenseDurationDays: 365,
     requiresActivation: true,
     offlineGraceDays: 7,
@@ -38,6 +41,8 @@ const products = [
     purchaseType: 'SUBSCRIPTION' as const,
     pricingType: 'FIXED' as const,
     validationMode: 'HYBRID' as const,
+    priceMonthly: 19900,
+    priceAnnual: 199000,
     licenseDurationDays: 365,
     requiresActivation: true,
     offlineGraceDays: 7,
