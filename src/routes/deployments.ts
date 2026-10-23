@@ -16,6 +16,7 @@ import { DeploymentStatus } from '@prisma/client';
 import { logger } from '../services/logger.service.js';
 import { config } from '../config/index.js';
 import { requireApiKey } from '../utils/apiKey.js';
+import { enrolDeployment, entitlementOf } from '../services/deployment.service.js';
 
 const router = express.Router();
 
@@ -37,6 +38,8 @@ interface ValidationResponse {
   message: string;
   expiresAt?: string;
   features?: string[];
+  /** The components the deployment's licence enables now (aos, codeeasy, cloudcode, models-host). */
+  components?: string[];
   tier?: string;
   action?: 'continue' | 'warn' | 'kill';
   killReason?: string;
@@ -96,6 +99,44 @@ function verifySignature(payload: string, signature: string | undefined, secret:
  * Validates a deployment fingerprint against registered deployments.
  * Returns validation status and any actions to take.
  */
+// ============================================================================
+// Enrol with a licence key (no admin key: the product's own first start)
+// ============================================================================
+
+/**
+ * POST /api/deployments/enrol
+ *
+ * A product that installs itself (the Agencie Lab's AOS, a models host) presents its licence
+ * key and a machine fingerprint. The licence is validated and activated for that machine, a
+ * deployment bound to it is created (or, for the same machine, re-keyed), and the secret comes
+ * back once with the licence's components, features and expiry. See deployment.service.ts.
+ */
+router.post('/enrol', async (req, res) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const str = (v: unknown, max = 200): string | undefined => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+    const result = await enrolDeployment({
+      licenseKey: str(b.licenseKey) ?? '',
+      deploymentId: str(b.deploymentId, 100) ?? '',
+      machineHash: str(b.machineHash, 128) ?? '',
+      machineName: str(b.machineName, 120),
+      version: str(b.version, 40),
+      environment: str(b.environment, 20),
+      component: str(b.component, 40),
+      ipAddress: req.ip,
+    });
+    if (!result.ok) {
+      logger.warn('Deployment enrolment refused', { deploymentId: b.deploymentId, error: result.error, ip: req.ip });
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+    const { ok: _ok, ...rest } = result;
+    return res.json({ success: true, ...rest });
+  } catch (error) {
+    logger.error('Deployment enrolment error', error);
+    return res.status(500).json({ success: false, error: 'Enrolment failed' });
+  }
+});
+
 router.post('/validate', async (req, res) => {
   try {
     const fingerprint = (req.body || {}) as DeploymentFingerprint;
@@ -292,6 +333,13 @@ router.post('/validate', async (req, res) => {
 
     if (deployment.license?.expiresAt) {
       response.expiresAt = deployment.license.expiresAt.toISOString();
+    }
+    // What the licence enables now, so a change made on the server reaches the deployment at
+    // its next check without a re-enrolment.
+    const entitlement = await entitlementOf(deployment);
+    if (entitlement) {
+      response.components = entitlement.components;
+      response.features = entitlement.features;
     }
 
     logger.info('Deployment validated successfully', { deploymentId });

@@ -18,7 +18,8 @@
     "seed:k8inspector": "npx tsx prisma/seed-k8inspector.ts",
     "seed:silo": "npx tsx prisma/seed-silo.ts",
     "seed:all": "npx tsx prisma/seed-k8inspector.ts && npx tsx prisma/seed-silo.ts",
-    "sync:stripe": "npx tsx prisma/sync-stripe.ts"
+    "sync:stripe": "npx tsx prisma/sync-stripe.ts",
+    "seed:agencie-lab": "npx tsx prisma/seed-agencie-lab.ts"
   },
   "keywords": [
     "license",

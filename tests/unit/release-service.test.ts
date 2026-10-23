@@ -1,0 +1,67 @@
+import { describe, it, expect, beforeAll } from 'vitest';
+import crypto from 'crypto';
+
+import { canonical, compareVersions, manifestOf, setSigningKeyForTests, signManifest, verifyManifest, signedManifestOf } from '../../src/services/release.service.js';
+
+/**
+ * A release manifest is what a deployment acts on, so its signature must cover every field that
+ * matters, survive key order, and fail on any change.
+ */
+let publicPem = '';
+let otherPublicPem = '';
+
+beforeAll(() => {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  setSigningKeyForTests(privateKey.export({ type: 'pkcs1', format: 'pem' }).toString());
+  publicPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  otherPublicPem = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'pem' }).toString();
+});
+
+const release = {
+  productSlug: 'agencie-lab', channel: 'stable', version: '1.2.3', releaseDate: new Date('2026-10-24T10:00:00Z'),
+  artifactKey: 'releases/agencie-lab/aos-colony-1.2.3.tar', artifactSize: 300_000_000, artifactSha256: 'ab'.repeat(32),
+  imageRef: 'aos-colony:1.2.3', minVersion: '1.1.0', isCritical: false,
+};
+
+describe('release manifests', () => {
+  it('canonical JSON orders keys at every level', () => {
+    expect(canonical({ b: 1, a: { d: [3, { z: 1, y: 2 }], c: null } })).toBe('{"a":{"c":null,"d":[3,{"y":2,"z":1}]},"b":1}');
+  });
+
+  it('a manifest carries what the deployment acts on, and the date as a day', () => {
+    const m = manifestOf(release);
+    expect(m).toEqual({ product: 'agencie-lab', channel: 'stable', version: '1.2.3', releaseDate: '2026-10-24', artifact: { key: release.artifactKey, size: 300_000_000, sha256: 'ab'.repeat(32) }, imageRef: 'aos-colony:1.2.3', minVersion: '1.1.0', critical: false });
+    expect(manifestOf({ ...release, artifactKey: null, artifactSha256: null, minVersion: '' }).artifact).toBeNull();
+    expect(manifestOf({ ...release, minVersion: '' }).minVersion).toBeNull();
+  });
+
+  it('signs with the server key and verifies with its public key only; any change breaks it', () => {
+    const m = manifestOf(release);
+    const sig = signManifest(m)!;
+    expect(sig).toMatch(/^[A-Za-z0-9+/=]+$/);
+    expect(verifyManifest(m, sig, publicPem)).toBe(true);
+    expect(verifyManifest(m, sig, otherPublicPem)).toBe(false);
+    expect(verifyManifest({ ...m, version: '1.2.4' }, sig, publicPem)).toBe(false);
+    expect(verifyManifest({ ...m, artifact: { ...m.artifact!, sha256: 'cd'.repeat(32) } }, sig, publicPem)).toBe(false);
+    expect(verifyManifest(m, 'not-base64-signature', publicPem)).toBe(false);
+    // Key order does not matter to the verifier.
+    const reordered = { critical: m.critical, minVersion: m.minVersion, imageRef: m.imageRef, artifact: { sha256: m.artifact!.sha256, size: m.artifact!.size, key: m.artifact!.key }, releaseDate: m.releaseDate, version: m.version, channel: m.channel, product: m.product };
+    expect(verifyManifest(reordered as any, sig, publicPem)).toBe(true);
+  });
+
+  it('a stored signature is used as is; a row without one is signed now; no key means no manifest', () => {
+    const stored = { ...release, id: 'r1', releaseNotes: 'notes', downloadUrl: null, isActive: true, createdBy: null, createdAt: new Date(), updatedAt: new Date(), signature: 'stored' };
+    expect(signedManifestOf(stored as any)!.signature).toBe('stored');
+    const fresh = signedManifestOf({ ...stored, signature: null } as any)!;
+    expect(verifyManifest(fresh.manifest, fresh.signature, publicPem)).toBe(true);
+    expect(fresh.releaseNotes).toBe('notes');
+    setSigningKeyForTests(null);
+    expect(signedManifestOf({ ...stored, signature: null } as any)).toBeNull();
+  });
+
+  it('compares versions numerically', () => {
+    expect(compareVersions('1.10.0', '1.9.9')).toBe(1);
+    expect(compareVersions('v1.1.106', '1.1.106')).toBe(0);
+    expect(compareVersions('1.1.105-beta', '1.1.106')).toBe(-1);
+  });
+});

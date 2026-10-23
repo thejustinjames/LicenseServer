@@ -341,3 +341,18 @@ export function getProductBundlePrefix(category: string, productName: string): s
 
   return `${categoryPath}/${productPath}/`;
 }
+
+/**
+ * A signed download URL for a bundle-store key, for a caller that has already proved its right
+ * to it (a deployment with a valid signature and licence, release.service's download route).
+ */
+export async function presignKey(key: string): Promise<SignedDownloadUrl> {
+  if (!config.S3_BUCKET_NAME) {
+    throw new Error('S3 bucket not configured');
+  }
+  const command = new GetObjectCommand({ Bucket: config.S3_BUCKET_NAME, Key: key });
+  const url = await getSignedUrl(s3Client, command, { expiresIn: DOWNLOAD_EXPIRY_SECONDS });
+  const expiresAt = new Date();
+  expiresAt.setSeconds(expiresAt.getSeconds() + DOWNLOAD_EXPIRY_SECONDS);
+  return { url, expiresAt, expiresInHours: getDownloadExpiryHours(), filename: key.split('/').pop() || 'download' };
+}

@@ -10,6 +10,9 @@ import { z } from 'zod';
 import { prisma } from '../config/database.js';
 import { validationRateLimit } from '../middleware/rateLimit.js';
 import { logger } from '../services/logger.service.js';
+import crypto from 'crypto';
+import { signedManifestOf, compareVersions as compareSemver } from '../services/release.service.js';
+import { presignKey } from '../services/storage.service.js';
 
 const router = Router();
 
@@ -263,6 +266,74 @@ router.get('/history', async (req: Request, res: Response) => {
 /**
  * Get upgrade instructions based on deployment method
  */
+/**
+ * GET /api/updates/manifest?product=<slug>&channel=stable&currentVersion=1.2.3
+ *
+ * The active release on a channel as a SIGNED manifest: a deployment verifies the signature with
+ * the public key compiled into its build before it believes the version, the artefact or the
+ * image reference. `updateAvailable` compares against `currentVersion` when given.
+ */
+router.get('/manifest', async (req: Request, res: Response) => {
+  try {
+    const productSlug = String(req.query.product || '');
+    const channel = String(req.query.channel || 'stable');
+    const currentVersion = typeof req.query.currentVersion === 'string' ? req.query.currentVersion : null;
+    if (!/^[a-z0-9-]{2,50}$/.test(productSlug)) { res.status(400).json({ error: 'product is required (a slug)' }); return; }
+    if (!/^[a-z0-9-]{2,20}$/.test(channel)) { res.status(400).json({ error: 'channel must be a short slug' }); return; }
+    const release = await prisma.release.findFirst({ where: { productSlug, channel, isActive: true }, orderBy: { releaseDate: 'desc' } });
+    if (!release) { res.json({ product: productSlug, channel, updateAvailable: false, manifest: null, signature: null, releaseNotes: null }); return; }
+    const signed = signedManifestOf(release);
+    if (!signed) { res.status(503).json({ error: 'The server cannot sign releases (no signing key)' }); return; }
+    const updateAvailable = currentVersion ? compareSemver(release.version, currentVersion) > 0 : true;
+    const outdated = currentVersion && release.minVersion ? compareSemver(currentVersion, release.minVersion) < 0 : false;
+    res.json({ product: productSlug, channel, currentVersion, updateAvailable, outdated, ...signed });
+  } catch (error) {
+    logger.error('Manifest error:', error);
+    res.status(500).json({ error: 'Manifest lookup failed' });
+  }
+});
+
+/**
+ * POST /api/updates/download
+ *
+ * A download URL for a release's artefact, for an ACTIVE deployment with a licence in force:
+ * the body `{ deploymentId, product, version }` is signed with the deployment's secret in
+ * `X-Deployment-Signature` (HMAC-SHA256 of the raw JSON, as the validate route). The URL is the
+ * bundle store's signed URL, good for the configured hours; the manifest and its signature come
+ * back with it so the caller checks the bytes it fetches against the manifest it verified.
+ */
+router.post('/download', async (req: Request, res: Response) => {
+  try {
+    const b = (req.body || {}) as { deploymentId?: unknown; product?: unknown; version?: unknown };
+    const deploymentId = typeof b.deploymentId === 'string' ? b.deploymentId : '';
+    const product = typeof b.product === 'string' ? b.product : '';
+    const version = typeof b.version === 'string' ? b.version : '';
+    if (!deploymentId || !product || !version) { res.status(400).json({ error: 'deploymentId, product and version are required' }); return; }
+    const deployment = await prisma.deployment.findUnique({ where: { id: deploymentId }, include: { license: true } });
+    if (!deployment || !deployment.secret) { res.status(403).json({ error: 'Unknown deployment' }); return; }
+    const signature = req.headers['x-deployment-signature'];
+    const expected = crypto.createHmac('sha256', deployment.secret).update(JSON.stringify(req.body || {})).digest('hex');
+    if (typeof signature !== 'string' || signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+      logger.warn('Download refused: bad deployment signature', { deploymentId });
+      res.status(401).json({ error: 'Invalid deployment signature' }); return;
+    }
+    if (deployment.status !== 'ACTIVE') { res.status(403).json({ error: `Deployment is ${deployment.status.toLowerCase()}` }); return; }
+    if (deployment.license && (deployment.license.status !== 'ACTIVE' || (deployment.license.expiresAt && deployment.license.expiresAt < new Date()))) {
+      res.status(403).json({ error: 'Licence is not in force' }); return;
+    }
+    const release = await prisma.release.findUnique({ where: { productSlug_version: { productSlug: product, version } } });
+    if (!release || !release.artifactKey) { res.status(404).json({ error: 'No artefact for that release' }); return; }
+    const signed = signedManifestOf(release);
+    if (!signed) { res.status(503).json({ error: 'The server cannot sign releases (no signing key)' }); return; }
+    const link = await presignKey(release.artifactKey);
+    logger.info('Release download issued', { deploymentId, product, version });
+    res.json({ url: link.url, expiresAt: link.expiresAt.toISOString(), filename: link.filename, ...signed });
+  } catch (error) {
+    logger.error('Download error:', error);
+    res.status(500).json({ error: 'Download failed' });
+  }
+});
+
 function getUpgradeInstructions(deploymentMethod?: string, version?: string): object {
   const instructions: Record<string, object> = {
     docker: {

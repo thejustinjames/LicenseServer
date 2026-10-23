@@ -9,6 +9,10 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../config/database.js';
 import { logger } from '../services/logger.service.js';
+import crypto from 'crypto';
+import express from 'express';
+import { manifestOf, signManifest } from '../services/release.service.js';
+import { uploadFile, isS3Configured } from '../services/storage.service.js';
 
 const router = Router();
 
@@ -22,7 +26,14 @@ const releaseSchema = z.object({
   minVersion: z.string().regex(/^\d+\.\d+\.\d+(-[\w.]+)?$/).optional().or(z.literal('')),
   isCritical: z.boolean().optional(),
   isActive: z.boolean().optional(),
+  channel: z.string().regex(/^[a-z0-9-]{2,20}$/).optional(),
+  imageRef: z.string().max(200).optional().or(z.literal('')),
 });
+
+/** The signature over the manifest for a row as it is about to be stored. */
+function signatureFor(row: Parameters<typeof manifestOf>[0]): string | null {
+  return signManifest(manifestOf(row));
+}
 
 /**
  * GET /api/admin/releases
@@ -110,26 +121,28 @@ router.post('/', async (req: Request, res: Response) => {
     const data = releaseSchema.parse(req.body);
 
     // If this is marked as active, deactivate other releases for same product
+    const channel = data.channel || 'stable';
     if (data.isActive) {
       await prisma.release.updateMany({
-        where: { productSlug: data.productSlug, isActive: true },
+        where: { productSlug: data.productSlug, channel, isActive: true },
         data: { isActive: false },
       });
     }
-
-    const release = await prisma.release.create({
-      data: {
-        productSlug: data.productSlug,
-        version: data.version,
-        releaseDate: data.releaseDate ? new Date(data.releaseDate) : new Date(),
-        releaseNotes: data.releaseNotes || null,
-        downloadUrl: data.downloadUrl || null,
-        minVersion: data.minVersion || null,
-        isCritical: data.isCritical || false,
-        isActive: data.isActive ?? true,
-        createdBy: (req as any).user?.id || null,
-      },
-    });
+    const row = {
+      productSlug: data.productSlug,
+      channel,
+      version: data.version,
+      releaseDate: data.releaseDate ? new Date(data.releaseDate) : new Date(),
+      releaseNotes: data.releaseNotes || null,
+      downloadUrl: data.downloadUrl || null,
+      minVersion: data.minVersion || null,
+      isCritical: data.isCritical || false,
+      isActive: data.isActive ?? true,
+      imageRef: data.imageRef || null,
+      artifactKey: null as string | null, artifactSize: null as number | null, artifactSha256: null as string | null,
+      createdBy: (req as any).user?.id || null,
+    };
+    const release = await prisma.release.create({ data: { ...row, signature: signatureFor(row) } });
 
     logger.info('Release created', {
       releaseId: release.id,
@@ -199,7 +212,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       version: release.version,
     });
 
-    res.json(release);
+    const signed = await prisma.release.update({ where: { id: release.id }, data: { signature: signatureFor(release) } });
+    res.json(signed);
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ error: 'Invalid request', details: error.errors });
@@ -263,7 +277,7 @@ router.post('/:id/activate', async (req: Request, res: Response) => {
 
     // Deactivate all other releases for this product
     await prisma.release.updateMany({
-      where: { productSlug: release.productSlug, isActive: true },
+      where: { productSlug: release.productSlug, channel: release.channel, isActive: true },
       data: { isActive: false },
     });
 
@@ -283,6 +297,35 @@ router.post('/:id/activate', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Failed to activate release:', error);
     res.status(500).json({ error: 'Failed to activate release' });
+  }
+});
+
+/**
+ * PUT /api/admin/releases/:id/artifact?filename=<name>
+ *
+ * The release's artefact, as the raw request body (an image tarball, a package): stored in the
+ * bundle store under releases/<product>/<filename>, its size and SHA-256 recorded, and the
+ * manifest re-signed. Up to 1 GB.
+ */
+router.put('/:id/artifact', express.raw({ type: '*/*', limit: '1gb' }), async (req: Request, res: Response) => {
+  try {
+    if (!isS3Configured()) { res.status(503).json({ error: 'The bundle store (S3) is not configured' }); return; }
+    const release = await prisma.release.findUnique({ where: { id: req.params.id } });
+    if (!release) { res.status(404).json({ error: 'Release not found' }); return; }
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || body.length === 0) { res.status(400).json({ error: 'An artefact body is required' }); return; }
+    const given = typeof req.query.filename === 'string' ? req.query.filename : '';
+    const filename = (given || `${release.productSlug}-${release.version}.bin`).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 120);
+    const key = `releases/${release.productSlug}/${filename}`;
+    const sha256 = crypto.createHash('sha256').update(body).digest('hex');
+    await uploadFile(key, body, (req.headers['content-type'] as string) || 'application/octet-stream');
+    const row = { ...release, artifactKey: key, artifactSize: body.length, artifactSha256: sha256 };
+    const updated = await prisma.release.update({ where: { id: release.id }, data: { artifactKey: key, artifactSize: body.length, artifactSha256: sha256, signature: signatureFor(row) } });
+    logger.info('Release artefact stored', { releaseId: release.id, key, size: body.length });
+    res.json(updated);
+  } catch (error) {
+    logger.error('Failed to store release artefact:', error);
+    res.status(500).json({ error: 'Failed to store the artefact' });
   }
 });
 

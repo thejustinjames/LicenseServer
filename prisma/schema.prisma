@@ -1,6 +1,6 @@
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -718,6 +718,18 @@ model Release {
   // Status
   isActive     Boolean  @default(true) @map("is_active") // Current release for this product
 
+  // The update channel a deployment follows (stable, beta); one active release per product and channel.
+  channel      String   @default("stable")
+  // The artefact in the bundle store (an image tarball for AOS, a package for a client), its size
+  // and SHA-256, and for a container product the image reference inside the tarball. The
+  // signature is RSA-SHA256 over the canonical manifest (release.service.ts), made with the
+  // server's licence key; a deployment verifies it with the public key compiled into its build.
+  artifactKey    String?  @map("artifact_key")
+  artifactSize   Int?     @map("artifact_size")
+  artifactSha256 String?  @map("artifact_sha256")
+  imageRef       String?  @map("image_ref")
+  signature      String?  @db.Text
+
   // Audit
   createdBy    String?  @map("created_by")
   createdAt    DateTime @default(now()) @map("created_at")
@@ -726,6 +738,7 @@ model Release {
   @@unique([productSlug, version])
   @@index([productSlug])
   @@index([isActive])
+  @@index([productSlug, channel, isActive])
   @@map("releases")
 }
 
