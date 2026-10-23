@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Agencio. All rights reserved.
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../config/database.js';
 import { logger } from '../services/logger.service.js';
@@ -120,9 +120,10 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const data = releaseSchema.parse(req.body);
 
-    // If this is marked as active, deactivate other releases for same product
+    // A release is active unless told otherwise, and an active release stands alone on its
+    // product's channel: the others there are deactivated.
     const channel = data.channel || 'stable';
-    if (data.isActive) {
+    if (data.isActive ?? true) {
       await prisma.release.updateMany({
         where: { productSlug: data.productSlug, channel, isActive: true },
         data: { isActive: false },
@@ -184,10 +185,13 @@ router.put('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    // If setting as active, deactivate others for same product
-    if (data.isActive && !existing.isActive) {
+    // If the release is active once updated, it stands alone on its product's channel as the
+    // update leaves them (a move to another channel or product takes the active slot there).
+    const productSlug = data.productSlug || existing.productSlug;
+    const channel = data.channel || existing.channel;
+    if (data.isActive ?? existing.isActive) {
       await prisma.release.updateMany({
-        where: { productSlug: existing.productSlug, isActive: true },
+        where: { productSlug, channel, isActive: true, id: { not: existing.id } },
         data: { isActive: false },
       });
     }
@@ -203,6 +207,8 @@ router.put('/:id', async (req: Request, res: Response) => {
         ...(data.minVersion !== undefined && { minVersion: data.minVersion || null }),
         ...(data.isCritical !== undefined && { isCritical: data.isCritical }),
         ...(data.isActive !== undefined && { isActive: data.isActive }),
+        ...(data.channel && { channel: data.channel }),
+        ...(data.imageRef !== undefined && { imageRef: data.imageRef || null }),
       },
     });
 
@@ -306,8 +312,16 @@ router.post('/:id/activate', async (req: Request, res: Response) => {
  * The release's artefact, as the raw request body (an image tarball, a package): stored in the
  * bundle store under releases/<product>/<filename>, its size and SHA-256 recorded, and the
  * manifest re-signed. Up to 1 GB.
+ *
+ * The body is buffered whole in memory (the hash and the store's upload both want the bytes), so
+ * an upload costs the process its size in RAM while it runs; one at a time is the expectation.
+ * A body over the limit is answered 413 here, as JSON, before any of that.
  */
-router.put('/:id/artifact', express.raw({ type: '*/*', limit: '1gb' }), async (req: Request, res: Response) => {
+const ARTIFACT_LIMIT = '1gb';
+router.put('/:id/artifact', express.raw({ type: '*/*', limit: ARTIFACT_LIMIT }), (err: Error & { type?: string }, _req: Request, res: Response, next: NextFunction) => {
+  if (err?.type === 'entity.too.large') { res.status(413).json({ error: `The artefact is larger than the ${ARTIFACT_LIMIT} limit` }); return; }
+  next(err);
+}, async (req: Request, res: Response) => {
   try {
     if (!isS3Configured()) { res.status(503).json({ error: 'The bundle store (S3) is not configured' }); return; }
     const release = await prisma.release.findUnique({ where: { id: req.params.id } });

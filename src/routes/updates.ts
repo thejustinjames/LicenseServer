@@ -309,11 +309,14 @@ router.post('/download', async (req: Request, res: Response) => {
     const product = typeof b.product === 'string' ? b.product : '';
     const version = typeof b.version === 'string' ? b.version : '';
     if (!deploymentId || !product || !version) { res.status(400).json({ error: 'deploymentId, product and version are required' }); return; }
-    const deployment = await prisma.deployment.findUnique({ where: { id: deploymentId }, include: { license: true } });
+    const deployment = await prisma.deployment.findUnique({ where: { id: deploymentId }, include: { license: true, product: { select: { slug: true } } } });
     if (!deployment || !deployment.secret) { res.status(403).json({ error: 'Unknown deployment' }); return; }
     const signature = req.headers['x-deployment-signature'];
-    const expected = crypto.createHmac('sha256', deployment.secret).update(JSON.stringify(req.body || {})).digest('hex');
-    if (typeof signature !== 'string' || signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    const expected = Buffer.from(crypto.createHmac('sha256', deployment.secret).update(JSON.stringify(req.body || {})).digest('hex'));
+    // Compare as bytes: timingSafeEqual throws on a length mismatch, and a string's length is
+    // not its byte length once a header carries anything beyond ASCII.
+    const presented = typeof signature === 'string' ? Buffer.from(signature) : Buffer.alloc(0);
+    if (presented.length !== expected.length || !crypto.timingSafeEqual(presented, expected)) {
       logger.warn('Download refused: bad deployment signature', { deploymentId });
       res.status(401).json({ error: 'Invalid deployment signature' }); return;
     }
@@ -321,7 +324,13 @@ router.post('/download', async (req: Request, res: Response) => {
     if (deployment.license && (deployment.license.status !== 'ACTIVE' || (deployment.license.expiresAt && deployment.license.expiresAt < new Date()))) {
       res.status(403).json({ error: 'Licence is not in force' }); return;
     }
-    const release = await prisma.release.findUnique({ where: { productSlug_version: { productSlug: product, version } } });
+    // A deployment downloads its own product's artefacts and nothing else's.
+    if (deployment.product?.slug !== product) {
+      logger.warn('Download refused: deployment is not of that product', { deploymentId, product });
+      res.status(403).json({ error: 'Deployment is not licensed for that product' }); return;
+    }
+    // Only an active release is served: a withdrawn one stays in the store but is not handed out.
+    const release = await prisma.release.findFirst({ where: { productSlug: product, version, isActive: true } });
     if (!release || !release.artifactKey) { res.status(404).json({ error: 'No artefact for that release' }); return; }
     const signed = signedManifestOf(release);
     if (!signed) { res.status(503).json({ error: 'The server cannot sign releases (no signing key)' }); return; }

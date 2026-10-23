@@ -304,7 +304,10 @@ export async function activateLicense(
     return { success: false, error: result.error };
   }
 
-  if (result.created) {
+  // A licence issued with `metadata.notify: false` (the automation door) is not announced by
+  // email: the activation email carries the key in clear, to an address that may not be a person's.
+  const notify = (license.metadata as { notify?: unknown } | null)?.notify !== false;
+  if (result.created && notify) {
     // Send license activated email (fire and forget)
     emailService.sendLicenseActivatedEmail(
       license.customer.email,

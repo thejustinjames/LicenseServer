@@ -20,6 +20,8 @@ export interface CreateCustomerInput {
   password: string;
   name?: string;
   isAdmin?: boolean;
+  /** No welcome email: for a customer created by automation, who did not sign up and has no portal password to use. */
+  skipNotifications?: boolean;
 }
 
 export interface CreateExternalCustomerInput {
@@ -83,7 +85,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
   });
 
   // Send welcome email (don't await - fire and forget)
-  if (!input.isAdmin) {
+  if (!input.isAdmin && !input.skipNotifications) {
     emailService.sendWelcomeEmail(customer.email, customer.name || undefined).catch((err) => {
       logger.error('Failed to send welcome email', err);
     });

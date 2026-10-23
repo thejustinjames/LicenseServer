@@ -8,8 +8,9 @@
  * `maxActivations`, one per machine for the Lab products), and a deployment is created, bound
  * to the licence, its customer and its product, with a freshly minted secret. The secret is
  * returned once. The same machine enrolling again (a rebuilt host, a lost data volume) gets a
- * new secret and the old one is dead; a different machine presenting an id that is taken is
- * refused.
+ * new secret and the old one is dead; the same machine enrolling with a new licence key (a
+ * renewal, a change of tier) is moved to the new licence and its seat on the old one is freed;
+ * a different machine presenting an id that is taken is refused.
  */
 import crypto from 'crypto';
 import { prisma } from '../config/database.js';
@@ -54,7 +55,11 @@ export async function enrolDeployment(input: EnrolInput): Promise<EnrolResult> {
   if (!license) return { ok: false, status: 403, error: 'Invalid license key' };
 
   const existing = await prisma.deployment.findUnique({ where: { id: input.deploymentId } });
-  if (existing && (existing.licenseId !== license.id || (existing.machineHash && existing.machineHash !== input.machineHash))) {
+  // A taken id is only ever re-used by the machine that holds it: another machine is refused,
+  // and so is another licence when the deployment has no machine on record to compare.
+  const sameMachine = !!existing?.machineHash && existing.machineHash === input.machineHash;
+  const rebinding = !!existing && existing.licenseId !== license.id;
+  if (existing && !sameMachine && (existing.machineHash || rebinding)) {
     return { ok: false, status: 409, error: `Deployment id "${input.deploymentId}" belongs to another licence or machine` };
   }
   if (existing && (existing.status === 'REVOKED' || existing.status === 'KILL')) {
@@ -70,7 +75,13 @@ export async function enrolDeployment(input: EnrolInput): Promise<EnrolResult> {
     machineName: input.machineName ?? null,
     ip: input.ipAddress ?? null,
     ...(existing ? { reEnrolledAt: new Date().toISOString() } : {}),
+    ...(rebinding ? { reboundFrom: existing!.licenseId } : {}),
   };
+  // The same machine moving to a new licence: its seat on the old licence is freed, so the old
+  // key is not left counting a machine that no longer runs on it.
+  if (rebinding && existing!.licenseId) {
+    await prisma.licenseActivation.deleteMany({ where: { licenseId: existing!.licenseId, machineFingerprint: input.machineHash } });
+  }
   await prisma.deployment.upsert({
     where: { id: input.deploymentId },
     create: {
@@ -87,6 +98,9 @@ export async function enrolDeployment(input: EnrolInput): Promise<EnrolResult> {
       metadata,
     },
     update: {
+      productId: license.productId,
+      customerId: license.customerId,
+      licenseId: license.id,
       secret,
       machineHash: input.machineHash,
       version: input.version ?? existing?.version ?? null,
@@ -96,7 +110,7 @@ export async function enrolDeployment(input: EnrolInput): Promise<EnrolResult> {
       metadata,
     },
   });
-  logger.info(existing ? 'Deployment re-enrolled with a licence key' : 'Deployment enrolled with a licence key', { deploymentId: input.deploymentId, licenseId: license.id, component: input.component });
+  logger.info(rebinding ? 'Deployment moved to a new licence' : existing ? 'Deployment re-enrolled with a licence key' : 'Deployment enrolled with a licence key', { deploymentId: input.deploymentId, licenseId: license.id, previousLicenseId: rebinding ? existing!.licenseId : undefined, component: input.component });
 
   const components = licenseService.effectiveComponentsFor(license);
   const features = await effectiveFeatures(license);

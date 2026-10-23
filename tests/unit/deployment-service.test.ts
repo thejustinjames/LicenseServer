@@ -4,6 +4,7 @@ vi.mock('../../src/config/database.js', () => {
   const prisma: Record<string, unknown> = {
     license: { findUnique: vi.fn(), update: vi.fn() },
     deployment: { findUnique: vi.fn(), upsert: vi.fn() },
+    licenseActivation: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     licenseAddOn: { findMany: vi.fn().mockResolvedValue([]) },
   };
   return { prisma };
@@ -81,6 +82,27 @@ describe('enrolDeployment', () => {
     expect(taken).toMatchObject({ ok: false, status: 409 });
     vi.mocked(prisma.deployment.findUnique).mockResolvedValue({ id: 'bosgame-aos', licenseId: 'lic-1', machineHash: input.machineHash, status: 'KILL' } as any);
     expect(await enrolDeployment(input)).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('the same machine enrolling with a new licence key is moved to it and its seat on the old licence freed', async () => {
+    vi.mocked(prisma.deployment.findUnique).mockResolvedValue({ id: 'bosgame-aos', licenseId: 'lic-0', customerId: 'cus-0', productId: 'prod-0', machineHash: input.machineHash, status: 'ACTIVE', metadata: {}, version: '1.1.100' } as any);
+    const moved = await enrolDeployment(input);
+    expect(moved.ok).toBe(true);
+    const upsert = vi.mocked(prisma.deployment.upsert).mock.calls[0]![0] as any;
+    expect(upsert.update).toMatchObject({ licenseId: 'lic-1', customerId: 'cus-1', productId: 'prod-1', machineHash: input.machineHash });
+    expect(upsert.update.metadata.reboundFrom).toBe('lic-0');
+    expect(prisma.licenseActivation.deleteMany).toHaveBeenCalledWith({ where: { licenseId: 'lic-0', machineFingerprint: input.machineHash } });
+    // The same key on the same machine is a plain re-enrolment: nothing to free.
+    vi.mocked(prisma.licenseActivation.deleteMany).mockClear();
+    vi.mocked(prisma.deployment.findUnique).mockResolvedValue({ id: 'bosgame-aos', licenseId: 'lic-1', machineHash: input.machineHash, status: 'ACTIVE', metadata: {} } as any);
+    expect((await enrolDeployment(input)).ok).toBe(true);
+    expect(prisma.licenseActivation.deleteMany).not.toHaveBeenCalled();
+    // A different machine on another licence is still refused, and so is another licence when no machine is on record.
+    vi.mocked(prisma.deployment.findUnique).mockResolvedValue({ id: 'bosgame-aos', licenseId: 'lic-0', machineHash: 'e'.repeat(64), status: 'ACTIVE' } as any);
+    expect(await enrolDeployment(input)).toMatchObject({ ok: false, status: 409 });
+    vi.mocked(prisma.deployment.findUnique).mockResolvedValue({ id: 'bosgame-aos', licenseId: 'lic-0', machineHash: null, status: 'ACTIVE' } as any);
+    expect(await enrolDeployment(input)).toMatchObject({ ok: false, status: 409 });
+    expect(prisma.licenseActivation.deleteMany).not.toHaveBeenCalled();
   });
 
   it('entitlementOf answers the licence\'s components and features, or null without a licence', async () => {

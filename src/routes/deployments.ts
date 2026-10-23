@@ -16,6 +16,7 @@ import { DeploymentStatus } from '@prisma/client';
 import { logger } from '../services/logger.service.js';
 import { config } from '../config/index.js';
 import { requireApiKey } from '../utils/apiKey.js';
+import { validationRateLimit } from '../middleware/rateLimit.js';
 import { enrolDeployment, entitlementOf } from '../services/deployment.service.js';
 
 const router = express.Router();
@@ -111,7 +112,7 @@ function verifySignature(payload: string, signature: string | undefined, secret:
  * deployment bound to it is created (or, for the same machine, re-keyed), and the secret comes
  * back once with the licence's components, features and expiry. See deployment.service.ts.
  */
-router.post('/enrol', async (req, res) => {
+router.post('/enrol', validationRateLimit, async (req, res) => {
   try {
     const b = (req.body || {}) as Record<string, unknown>;
     const str = (v: unknown, max = 200): string | undefined => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
@@ -402,11 +403,11 @@ router.post('/heartbeat', async (req, res) => {
       });
     }
 
-    // If the client signed the heartbeat, the signature must verify. (The
-    // documented heartbeat contract does not require a signature, so an
-    // unsigned heartbeat from a registered deployment is still accepted.)
+    // A deployment with a secret must sign its heartbeat, as it signs its validation: the
+    // heartbeat consumes pending commands and overwrites metrics, so an unsigned one is not
+    // allowed to. Only a deployment without a secret is still taken at its word.
     const heartbeatSignature = req.headers['x-deployment-signature'] as string | undefined;
-    if (deployment.secret && heartbeatSignature && heartbeatSignature !== 'unsigned') {
+    if (deployment.secret) {
       if (!verifySignature(JSON.stringify(req.body || {}), heartbeatSignature, deployment.secret)) {
         logger.warn('Invalid signature on deployment heartbeat', { deploymentId });
         return res.status(401).json(signHeartbeatResponse({

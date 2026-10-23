@@ -49,6 +49,7 @@ vi.mock('../../src/utils/license-key.js', async () => {
 });
 
 import { prisma } from '../../src/config/database.js';
+import * as emailService from '../../src/services/email.service.js';
 import * as licenseService from '../../src/services/license.service.js';
 
 describe('License Service', () => {
@@ -286,6 +287,31 @@ describe('License Service', () => {
       // The seat check runs inside a transaction holding a row lock
       expect(prisma.$transaction).toHaveBeenCalled();
       expect(prisma.$executeRaw).toHaveBeenCalled();
+      expect(emailService.sendLicenseActivatedEmail).toHaveBeenCalledWith('test@example.com', 'Test User', 'Test Product', 'ABCD-EFGH-IJKL-MNOP', 'Test Device', undefined);
+    });
+
+    it('does not email the key for a licence issued with metadata.notify false', async () => {
+      const mockLicense = {
+        id: 'test-id',
+        key: 'ABCD-EFGH-IJKL-MNOP',
+        status: 'ACTIVE',
+        expiresAt: null,
+        maxActivations: 3,
+        activations: [],
+        metadata: { issuedBy: 'automation', notify: false },
+        product: { id: 'product-1', name: 'Test Product', features: [] },
+        customer: { id: 'customer-1', email: 'test@example.com', name: 'Test User' },
+      };
+      vi.mocked(prisma.license.findUnique).mockResolvedValue(mockLicense as any);
+      vi.mocked(prisma.licenseActivation.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.licenseActivation.count).mockResolvedValue(0);
+      vi.mocked(prisma.licenseActivation.create).mockResolvedValue({ id: 'activation-1', licenseId: 'test-id', machineFingerprint: 'device-123' } as any);
+
+      const result = await licenseService.activateLicense('ABCD-EFGH-IJKL-MNOP', 'device-123', 'Test Device');
+
+      expect(result.success).toBe(true);
+      expect(prisma.licenseActivation.create).toHaveBeenCalled();
+      expect(emailService.sendLicenseActivatedEmail).not.toHaveBeenCalled();
     });
 
     it('should reject when a concurrent activation filled the last seat', async () => {

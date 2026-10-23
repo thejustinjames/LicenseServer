@@ -46,7 +46,8 @@ router.post('/licences', async (req: Request, res: Response) => {
     if (!product) { res.status(404).json({ error: `Product not found: ${data.productSlug}` }); return; }
     let customer = await customerService.getCustomerByEmail(data.customerEmail);
     if (!customer) {
-      const created = await customerService.createCustomer({ email: data.customerEmail, name: data.customerName, password: crypto.randomBytes(24).toString('base64url') });
+      // No welcome email: the customer did not sign up and the password is not theirs to use.
+      const created = await customerService.createCustomer({ email: data.customerEmail, name: data.customerName, password: crypto.randomBytes(24).toString('base64url'), skipNotifications: true });
       customer = await customerService.getCustomerByEmail(created.email);
       if (!customer) { res.status(500).json({ error: 'Customer could not be created' }); return; }
     }
@@ -55,7 +56,8 @@ router.post('/licences', async (req: Request, res: Response) => {
       customerId: customer.id, productId: product.id, expiresAt,
       maxActivations: data.maxActivations ?? 1,
       ...(data.enabledComponents ? { enabledComponents: data.enabledComponents } : {}),
-      metadata: { issuedBy: 'automation', issuedAt: new Date().toISOString(), ...(data.note ? { note: data.note } : {}) },
+      // notify: false keeps the key out of email: the first activation is not announced.
+      metadata: { issuedBy: 'automation', issuedAt: new Date().toISOString(), notify: false, ...(data.note ? { note: data.note } : {}) },
     });
     logger.info('Licence issued by automation', { licenseId: license.id, productSlug: product.slug, customerId: customer.id });
     res.status(201).json({ id: license.id, key: license.key, product: product.name, productSlug: product.slug, customer: { id: customer.id, email: customer.email, name: customer.name }, expiresAt: license.expiresAt, maxActivations: license.maxActivations, components: license.enabledComponents.length ? license.enabledComponents : product.components });
