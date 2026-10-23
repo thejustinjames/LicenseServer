@@ -105,6 +105,10 @@ on the host. The lab's one-pastes are in LabSetup's `Bosgame/frontier-lab-licens
   is re-keyed; revoke the old one.
 - **Publish a release**: create it (inactive), upload the artefact, activate it. For the lab,
   `release-aos.sh <version>` on the Docker host does all three.
+- **What is never collected**: an installation's heartbeat carries its version and host name,
+  never requests, tokens or models. The Agencie Lab is paid for by the licence subscription and
+  never metered by usage (decided 24 October 2026); the `UsageRecord` and credits machinery here
+  is Predict's and is not wired to the Lab products.
 - **Push an update**: a `DeploymentCommand` of type `UPDATE` with `{ version }`; the heartbeat
   delivers it and the installation marks the release as asked for; applying stays the admin's
   click on its console.
