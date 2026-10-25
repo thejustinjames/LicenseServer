@@ -410,9 +410,58 @@ export async function presignKey(key: string): Promise<SignedDownloadUrl> {
   if (!config.S3_BUCKET_NAME) {
     throw new Error('S3 bucket not configured');
   }
+  if (downloadsViaServer()) return serverLink(key);
   const command = new GetObjectCommand({ Bucket: config.S3_BUCKET_NAME, Key: key });
   const url = await getSignedUrl(s3Client, command, { expiresIn: DOWNLOAD_EXPIRY_SECONDS });
   const expiresAt = new Date();
   expiresAt.setSeconds(expiresAt.getSeconds() + DOWNLOAD_EXPIRY_SECONDS);
   return { url, expiresAt, expiresInHours: getDownloadExpiryHours(), filename: key.split('/').pop() || 'download' };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Downloads through this server, for a store the downloader cannot reach (MinIO on the lab's
+// internal network). The link names the key and an expiry, signed with a key derived from
+// JWT_SECRET; GET /api/updates/files/<token> checks it and streams the object.
+
+function downloadsViaServer(): boolean {
+  if (config.DOWNLOADS_VIA_SERVER === 'true') return true;
+  if (config.DOWNLOADS_VIA_SERVER === 'false') return false;
+  return Boolean(config.S3_ENDPOINT);
+}
+
+function linkKey(): Buffer {
+  return crypto.createHmac('sha256', config.JWT_SECRET).update('agencie:download-links:v1').digest();
+}
+
+function serverLink(key: string): SignedDownloadUrl {
+  if (!config.APP_URL) throw new Error('APP_URL is required for downloads through the server');
+  const expiresAt = new Date(Date.now() + DOWNLOAD_EXPIRY_SECONDS * 1000);
+  const payload = Buffer.from(JSON.stringify({ k: key, e: Math.floor(expiresAt.getTime() / 1000) })).toString('base64url');
+  const sig = crypto.createHmac('sha256', linkKey()).update(payload).digest('base64url');
+  const base = config.APP_URL.replace(/\/+$/, '');
+  return { url: `${base}/api/updates/files/${payload}.${sig}`, expiresAt, expiresInHours: getDownloadExpiryHours(), filename: key.split('/').pop() || 'download' };
+}
+
+/** The key a server download link names, or null when the link is forged, malformed or expired. */
+export function keyFromDownloadToken(token: string, now = Date.now()): string | null {
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return null;
+  const expected = crypto.createHmac('sha256', linkKey()).update(payload).digest();
+  let given: Buffer;
+  try { given = Buffer.from(sig, 'base64url'); } catch { return null; }
+  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
+  try {
+    const { k, e } = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { k?: unknown; e?: unknown };
+    if (typeof k !== 'string' || typeof e !== 'number' || e * 1000 < now) return null;
+    return k;
+  } catch {
+    return null;
+  }
+}
+
+/** The object behind a download link, as a stream with its length. */
+export async function openObject(key: string): Promise<{ body: NodeJS.ReadableStream; size: number | null; filename: string }> {
+  if (!config.S3_BUCKET_NAME) throw new Error('S3 bucket not configured');
+  const r = await s3Client.send(new GetObjectCommand({ Bucket: config.S3_BUCKET_NAME, Key: key }));
+  return { body: r.Body as NodeJS.ReadableStream, size: typeof r.ContentLength === 'number' ? r.ContentLength : null, filename: key.split('/').pop() || 'download' };
 }

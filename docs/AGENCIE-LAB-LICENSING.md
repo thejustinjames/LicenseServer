@@ -89,7 +89,10 @@ held in memory), under `releases/<product>/<version>/<component>-<platform>-<fil
 → `{ key, size, sha256, imageRef, version }`, inside the signature; a release with none has no
 `components` key, so its manifest is byte for byte what it was. The `aos` component on `any`
 also fills the release's single artefact and image reference, which consoles that know only
-those act on. A component's licence module: `aos` and `vscode` need `aos`, `codeeasy`
+those act on. Where a link points: with a private store (`S3_ENDPOINT` set, as MinIO on the lab's
+internal network) the server signs its own expiring link, `APP_URL/api/updates/files/<token>`,
+and streams the file; on AWS the store's presigned URL (`DOWNLOADS_VIA_SERVER`: `auto`, `true`,
+`false`). A component's licence module: `aos` and `vscode` need `aos`, `codeeasy`
 `codeeasy`, `cloudcode` `cloudcode`, `models-runtime` `models-host`; anything else (the
 installer `glue`, the `updater`) needs only a licence for the product
 (`COMPONENT_MODULE` in `release.service.ts`). Deleting a release leaves its objects in the store.

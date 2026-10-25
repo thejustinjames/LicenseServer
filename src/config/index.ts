@@ -37,6 +37,10 @@ const envSchema = z.object({
   S3_ENDPOINT: z.string().optional(), // For MinIO: http://minio:9000
   S3_FORCE_PATH_STYLE: z.string().default('false'), // Required for MinIO
   S3_DOWNLOAD_EXPIRY_HOURS: z.string().default('4'), // Download link expiry
+  // Where a download link points: 'true' through this server (/api/updates/files/…), 'false' the
+  // store's own presigned URL, 'auto' through this server when the store is a private one
+  // (S3_ENDPOINT set, e.g. MinIO on an internal network) and the store's URL on AWS.
+  DOWNLOADS_VIA_SERVER: z.enum(['auto', 'true', 'false']).default('auto'),
 
   // Config Provider
   CONFIG_PROVIDER: z.enum(['env', 'secrets-manager', 'kubernetes']).default('env'),

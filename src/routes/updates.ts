@@ -13,7 +13,7 @@ import { logger } from '../services/logger.service.js';
 import crypto from 'crypto';
 import { signedManifestOf, compareVersions as compareSemver, componentAllowed, pickArtifact, COMPONENT_RE, PLATFORM_RE } from '../services/release.service.js';
 import { effectiveComponentsFor, getLicenseByKey } from '../services/license.service.js';
-import { presignKey } from '../services/storage.service.js';
+import { presignKey, keyFromDownloadToken, openObject } from '../services/storage.service.js';
 
 const router = Router();
 
@@ -399,6 +399,32 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Bootstrap download error:', error);
     res.status(500).json({ error: 'Download failed' });
+  }
+});
+
+/**
+ * GET /api/updates/files/<token>
+ *
+ * A release file streamed from the bundle store, for a link this server signed (download and
+ * bootstrap answer with one when the store is not reachable from outside). The token names the
+ * object and an expiry; nothing else is served.
+ */
+router.get('/files/:token', async (req: Request, res: Response) => {
+  req.setTimeout(60 * 60_000);
+  res.setTimeout(60 * 60_000);
+  const key = keyFromDownloadToken(req.params.token);
+  if (!key || !key.startsWith('releases/')) { res.status(403).json({ error: 'The link is not valid or has expired' }); return; }
+  try {
+    const obj = await openObject(key);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${obj.filename.replace(/"/g, '')}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    if (obj.size !== null) res.setHeader('Content-Length', String(obj.size));
+    obj.body.on('error', (e) => { logger.error('Release file stream failed', { key, error: String(e) }); res.destroy(e as Error); });
+    obj.body.pipe(res);
+  } catch (error) {
+    logger.error('Release file error:', error);
+    if (!res.headersSent) res.status(404).json({ error: 'No such file' });
   }
 });
 
