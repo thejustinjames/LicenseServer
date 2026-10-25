@@ -54,7 +54,14 @@ with HMAC-SHA256 in `X-Deployment-Signature`, the answer signed the same way wit
 answers the active release on the channel as a signed manifest (below), and
 `POST /api/updates/download` with `{ deploymentId, product, version }` signed in
 `X-Deployment-Signature` answers a bundle-store URL for the artefact, good for the configured
-hours, for a deployment that is `ACTIVE` with a licence in force.
+hours, for a deployment that is `ACTIVE` with a licence in force. With `component` and
+`platform` in the signed body it answers that component's artefact instead, refused when the
+licence leaves out the component's module.
+
+**Bootstrap** `POST /api/updates/bootstrap` with `{ licenseKey, product, component, platform?,
+version?, channel? }` answers the same for an installer that has enrolled nothing yet: the
+licence key is the credential, the licence must be in force and for the product, and the
+component's module must be in it. Without `version`, the active release on the channel.
 
 ## Releases
 
@@ -73,6 +80,25 @@ signature, shown and never acted on.
 (up to 1 GB), stores it under `releases/<product>/<filename>`, records size and SHA-256 and
 re-signs. The same routes are mounted under the automation door for scripts.
 
+**Several parts** (25 October 2026). A release of a product made of several parts carries one
+artefact per component and platform (`release_artifacts`):
+`PUT /api/admin/releases/:id/artifacts/:component?platform=<os-arch|any>&filename=&imageRef=&version=`
+streams the body to the bundle store in 16 MB parts, hashing on the way (up to 8 GB, nothing
+held in memory), under `releases/<product>/<version>/<component>-<platform>-<filename>`;
+`DELETE` on the same path takes one out. The manifest gains `components`, component → platform
+→ `{ key, size, sha256, imageRef, version }`, inside the signature; a release with none has no
+`components` key, so its manifest is byte for byte what it was. The `aos` component on `any`
+also fills the release's single artefact and image reference, which consoles that know only
+those act on. A component's licence module: `aos` and `vscode` need `aos`, `codeeasy`
+`codeeasy`, `cloudcode` `cloudcode`, `models-runtime` `models-host`; anything else (the
+installer `glue`, the `updater`) needs only a licence for the product
+(`COMPONENT_MODULE` in `release.service.ts`). Deleting a release leaves its objects in the store.
+
+Checked on the lab the same day: a 1.1 GB component up in 14 seconds with its hash matching;
+the manifest's components and signature; the stable manifest unchanged; bootstrap downloads
+served, and refused for a licence without Code Easy, a platform with no artefact, an unknown
+key and the wrong product.
+
 ## The automation door
 
 The admin routes sign in a person (Cognito on the lab), which a build host cannot do.
@@ -83,7 +109,7 @@ The admin routes sign in a person (Cognito on the lab), which a build host canno
 | `POST /api/automation/licences` `{ customerEmail, customerName?, productSlug, days? \| expiresAt?, maxActivations?, enabledComponents?, note? }` | issues a licence; the customer is created by email when new (a random password: such a customer does not use the portal); answers the key once |
 | `GET /api/automation/licences?product=<slug>` | the product's licences without their keys: customer, status, expiry, activations, deployments |
 | `POST /api/automation/licences/:id/revoke` | revokes |
-| `/api/automation/releases/…` | the admin releases router as it is: create, update, activate, delete, the artefact upload |
+| `/api/automation/releases/…` | the admin releases router as it is: create, update, activate, delete, the artefact upload, the component uploads |
 
 The key stays in the server's environment; a script runs the calls from inside the container
 (`docker exec -i license-server node -e …`, the artefact streamed on stdin), so nothing holds it

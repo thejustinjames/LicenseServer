@@ -11,7 +11,8 @@ import { prisma } from '../config/database.js';
 import { validationRateLimit } from '../middleware/rateLimit.js';
 import { logger } from '../services/logger.service.js';
 import crypto from 'crypto';
-import { signedManifestOf, compareVersions as compareSemver } from '../services/release.service.js';
+import { signedManifestOf, compareVersions as compareSemver, componentAllowed, pickArtifact, COMPONENT_RE, PLATFORM_RE } from '../services/release.service.js';
+import { effectiveComponentsFor, getLicenseByKey } from '../services/license.service.js';
 import { presignKey } from '../services/storage.service.js';
 
 const router = Router();
@@ -280,7 +281,7 @@ router.get('/manifest', async (req: Request, res: Response) => {
     const currentVersion = typeof req.query.currentVersion === 'string' ? req.query.currentVersion : null;
     if (!/^[a-z0-9-]{2,50}$/.test(productSlug)) { res.status(400).json({ error: 'product is required (a slug)' }); return; }
     if (!/^[a-z0-9-]{2,20}$/.test(channel)) { res.status(400).json({ error: 'channel must be a short slug' }); return; }
-    const release = await prisma.release.findFirst({ where: { productSlug, channel, isActive: true }, orderBy: { releaseDate: 'desc' } });
+    const release = await prisma.release.findFirst({ where: { productSlug, channel, isActive: true }, orderBy: { releaseDate: 'desc' }, include: { artifacts: true } });
     if (!release) { res.json({ product: productSlug, channel, updateAvailable: false, manifest: null, signature: null, releaseNotes: null }); return; }
     const signed = signedManifestOf(release);
     if (!signed) { res.status(503).json({ error: 'The server cannot sign releases (no signing key)' }); return; }
@@ -301,15 +302,18 @@ router.get('/manifest', async (req: Request, res: Response) => {
  * `X-Deployment-Signature` (HMAC-SHA256 of the raw JSON, as the validate route). The URL is the
  * bundle store's signed URL, good for the configured hours; the manifest and its signature come
  * back with it so the caller checks the bytes it fetches against the manifest it verified.
+ *
+ * With `component` (and `platform`, default "any") the URL is for that component's artefact in
+ * a release made of several parts, refused when the licence leaves out the component's module.
  */
 router.post('/download', async (req: Request, res: Response) => {
   try {
-    const b = (req.body || {}) as { deploymentId?: unknown; product?: unknown; version?: unknown };
+    const b = (req.body || {}) as { deploymentId?: unknown; product?: unknown; version?: unknown; component?: unknown; platform?: unknown };
     const deploymentId = typeof b.deploymentId === 'string' ? b.deploymentId : '';
     const product = typeof b.product === 'string' ? b.product : '';
     const version = typeof b.version === 'string' ? b.version : '';
     if (!deploymentId || !product || !version) { res.status(400).json({ error: 'deploymentId, product and version are required' }); return; }
-    const deployment = await prisma.deployment.findUnique({ where: { id: deploymentId }, include: { license: true, product: { select: { slug: true } } } });
+    const deployment = await prisma.deployment.findUnique({ where: { id: deploymentId }, include: { license: { include: { product: { select: { components: true } } } }, product: { select: { slug: true, components: true } } } });
     if (!deployment || !deployment.secret) { res.status(403).json({ error: 'Unknown deployment' }); return; }
     const signature = req.headers['x-deployment-signature'];
     const expected = Buffer.from(crypto.createHmac('sha256', deployment.secret).update(JSON.stringify(req.body || {})).digest('hex'));
@@ -329,16 +333,71 @@ router.post('/download', async (req: Request, res: Response) => {
       logger.warn('Download refused: deployment is not of that product', { deploymentId, product });
       res.status(403).json({ error: 'Deployment is not licensed for that product' }); return;
     }
+    const component = typeof b.component === 'string' && b.component ? b.component : null;
+    const platform = typeof b.platform === 'string' && b.platform ? b.platform : 'any';
+    if (component && (!COMPONENT_RE.test(component) || !PLATFORM_RE.test(platform))) { res.status(400).json({ error: 'component or platform is malformed' }); return; }
+    if (component) {
+      const modules = deployment.license ? effectiveComponentsFor(deployment.license) : (deployment.product?.components ?? []);
+      if (!componentAllowed(component, modules)) {
+        logger.warn('Download refused: the licence leaves the component out', { deploymentId, component });
+        res.status(403).json({ error: `The licence does not include ${component}` }); return;
+      }
+    }
     // Only an active release is served: a withdrawn one stays in the store but is not handed out.
-    const release = await prisma.release.findFirst({ where: { productSlug: product, version, isActive: true } });
-    if (!release || !release.artifactKey) { res.status(404).json({ error: 'No artefact for that release' }); return; }
+    const release = await prisma.release.findFirst({ where: { productSlug: product, version, isActive: true }, include: { artifacts: true } });
+    if (!release) { res.status(404).json({ error: 'No artefact for that release' }); return; }
     const signed = signedManifestOf(release);
     if (!signed) { res.status(503).json({ error: 'The server cannot sign releases (no signing key)' }); return; }
-    const link = await presignKey(release.artifactKey);
-    logger.info('Release download issued', { deploymentId, product, version });
+    const key = component ? pickArtifact(signed.manifest, component, platform)?.key : release.artifactKey;
+    if (!key) { res.status(404).json({ error: component ? `No ${component} artefact for ${platform} in that release` : 'No artefact for that release' }); return; }
+    const link = await presignKey(key);
+    logger.info('Release download issued', { deploymentId, product, version, component, platform });
     res.json({ url: link.url, expiresAt: link.expiresAt.toISOString(), filename: link.filename, ...signed });
   } catch (error) {
     logger.error('Download error:', error);
+    res.status(500).json({ error: 'Download failed' });
+  }
+});
+
+/**
+ * POST /api/updates/bootstrap
+ *
+ * A download URL for an installer that has not enrolled anything yet: the licence key itself is
+ * the credential. Body `{ licenseKey, product, component, platform?, version?, channel? }`; the
+ * licence must be in force, be for `product`, and include the component's module. Without
+ * `version` the active release on the channel (default stable) is used. The signed manifest
+ * comes back with the URL, so the installer verifies the bytes against it before it runs them.
+ * Rate-limited with the rest of this router; a wrong key is answered as an unknown one.
+ */
+router.post('/bootstrap', async (req: Request, res: Response) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const str = (x: unknown) => (typeof x === 'string' ? x : '');
+    const licenseKey = str(b.licenseKey), product = str(b.product), component = str(b.component);
+    const platform = str(b.platform) || 'any', version = str(b.version), channel = str(b.channel) || 'stable';
+    if (!licenseKey || !product || !component) { res.status(400).json({ error: 'licenseKey, product and component are required' }); return; }
+    if (!COMPONENT_RE.test(component) || !PLATFORM_RE.test(platform) || !/^[a-z0-9-]{2,20}$/.test(channel)) { res.status(400).json({ error: 'component, platform or channel is malformed' }); return; }
+    const licence = await getLicenseByKey(licenseKey);
+    if (!licence) { res.status(403).json({ error: 'Unknown licence key' }); return; }
+    const withProduct = await prisma.license.findUnique({ where: { id: licence.id }, include: { product: { select: { slug: true, components: true } } } });
+    if (!withProduct || withProduct.product.slug !== product) { res.status(403).json({ error: 'The licence is not for that product' }); return; }
+    if (withProduct.status !== 'ACTIVE' || (withProduct.expiresAt && withProduct.expiresAt < new Date())) { res.status(403).json({ error: 'Licence is not in force' }); return; }
+    if (!componentAllowed(component, effectiveComponentsFor(withProduct))) { res.status(403).json({ error: `The licence does not include ${component}` }); return; }
+    const release = await prisma.release.findFirst({
+      where: version ? { productSlug: product, version, isActive: true } : { productSlug: product, channel, isActive: true },
+      orderBy: { releaseDate: 'desc' },
+      include: { artifacts: true },
+    });
+    if (!release) { res.status(404).json({ error: 'No active release' }); return; }
+    const signed = signedManifestOf(release);
+    if (!signed) { res.status(503).json({ error: 'The server cannot sign releases (no signing key)' }); return; }
+    const artefact = pickArtifact(signed.manifest, component, platform);
+    if (!artefact) { res.status(404).json({ error: `No ${component} artefact for ${platform} in ${release.version}` }); return; }
+    const link = await presignKey(artefact.key);
+    logger.info('Bootstrap download issued', { licenceId: licence.id, product, version: release.version, component, platform });
+    res.json({ url: link.url, expiresAt: link.expiresAt.toISOString(), filename: link.filename, version: release.version, ...signed });
+  } catch (error) {
+    logger.error('Bootstrap download error:', error);
     res.status(500).json({ error: 'Download failed' });
   }
 });

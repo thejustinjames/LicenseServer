@@ -8,10 +8,14 @@
  * trusts a download URL. The signature covers everything the deployment acts on: product,
  * channel, version, artefact key, size and SHA-256, image reference, minimum version and the
  * critical flag. Notes are outside it: they are shown, never acted on.
+ *
+ * A release made of several parts lists each component's artefacts under `components`
+ * (component → platform → artefact), inside the signature like everything else; a release with
+ * none has no `components` key at all, so its manifest is byte for byte what it always was.
  */
 import crypto from 'crypto';
 import fs from 'fs';
-import type { Release } from '@prisma/client';
+import type { Release, ReleaseArtifact } from '@prisma/client';
 import { config } from '../config/index.js';
 import { logger } from './logger.service.js';
 
@@ -24,6 +28,43 @@ export interface ReleaseManifest {
   imageRef: string | null;
   minVersion: string | null;
   critical: boolean;
+  /** Present only on a release with component artefacts: component → platform → artefact. */
+  components?: Record<string, Record<string, ComponentArtifact>>;
+}
+
+export interface ComponentArtifact {
+  key: string;
+  size: number;
+  sha256: string;
+  imageRef: string | null;
+  version: string | null;
+}
+
+/** The artefact rows a manifest is built from (the fields that matter, so tests can pass plain objects). */
+export type ArtifactRow = Pick<ReleaseArtifact, 'component' | 'platform' | 'key' | 'size' | 'sha256' | 'imageRef' | 'componentVersion'>;
+
+export const COMPONENT_RE = /^[a-z][a-z0-9-]{1,30}$/;
+export const PLATFORM_RE = /^(any|[a-z0-9]+-[a-z0-9]+)$/;
+
+/**
+ * The licence module a component belongs to. A licence that leaves the module out cannot fetch
+ * the component; a component not listed here (the installer, the updater) needs only a licence
+ * for the product. CloudCode's binaries and the VS Code extension are clients: CloudCode's own
+ * module, and AOS's for the extension, which talks to nothing else.
+ */
+export const COMPONENT_MODULE: Record<string, string> = {
+  aos: 'aos',
+  vscode: 'aos',
+  codeeasy: 'codeeasy',
+  cloudcode: 'cloudcode',
+  'models-runtime': 'models-host',
+};
+
+/** Whether a licence whose effective modules are `modules` may fetch `component`. An empty list is a legacy licence: everything. */
+export function componentAllowed(component: string, modules: string[]): boolean {
+  const needs = COMPONENT_MODULE[component];
+  if (!needs || modules.length === 0) return true;
+  return modules.includes(needs);
 }
 
 export interface SignedManifest {
@@ -45,8 +86,8 @@ export function setSigningKeyForTests(pem: string | null): void {
   privateKey = pem;
 }
 
-export function manifestOf(release: Pick<Release, 'productSlug' | 'channel' | 'version' | 'releaseDate' | 'artifactKey' | 'artifactSize' | 'artifactSha256' | 'imageRef' | 'minVersion' | 'isCritical'>): ReleaseManifest {
-  return {
+export function manifestOf(release: Pick<Release, 'productSlug' | 'channel' | 'version' | 'releaseDate' | 'artifactKey' | 'artifactSize' | 'artifactSha256' | 'imageRef' | 'minVersion' | 'isCritical'> & { artifacts?: ArtifactRow[] }): ReleaseManifest {
+  const manifest: ReleaseManifest = {
     product: release.productSlug,
     channel: release.channel,
     version: release.version,
@@ -56,6 +97,21 @@ export function manifestOf(release: Pick<Release, 'productSlug' | 'channel' | 'v
     minVersion: release.minVersion || null,
     critical: release.isCritical,
   };
+  if (release.artifacts && release.artifacts.length > 0) {
+    const components: Record<string, Record<string, ComponentArtifact>> = {};
+    for (const a of release.artifacts) {
+      (components[a.component] ??= {})[a.platform] = { key: a.key, size: Number(a.size), sha256: a.sha256, imageRef: a.imageRef ?? null, version: a.componentVersion ?? null };
+    }
+    manifest.components = components;
+  }
+  return manifest;
+}
+
+/** A component's artefact for a platform: the exact platform first, then "any". */
+export function pickArtifact(manifest: ReleaseManifest, component: string, platform: string): ComponentArtifact | null {
+  const byPlatform = manifest.components?.[component];
+  if (!byPlatform) return null;
+  return byPlatform[platform] ?? byPlatform['any'] ?? null;
 }
 
 /** JSON with keys in a fixed order at every level, so signer and verifier see the same bytes. */
@@ -82,7 +138,7 @@ export function verifyManifest(manifest: ReleaseManifest, signature: string, pub
 }
 
 /** The manifest a deployment is given: signed, or refused when the server cannot sign. */
-export function signedManifestOf(release: Release): SignedManifest | null {
+export function signedManifestOf(release: Release & { artifacts?: ArtifactRow[] }): SignedManifest | null {
   const manifest = manifestOf(release);
   const signature = release.signature ?? signManifest(manifest);
   if (!signature) return null;

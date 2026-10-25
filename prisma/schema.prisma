@@ -730,6 +730,12 @@ model Release {
   imageRef       String?  @map("image_ref")
   signature      String?  @db.Text
 
+  // A release of a product made of several parts (the Agencie Lab: AOS, Code Easy, the
+  // updater, CloudCode per platform, the VS Code extension, the installer) carries one
+  // artefact per component and platform; the manifest lists them under `components`. The
+  // single artefact above stays, for deployments that know only it (the AOS image).
+  artifacts    ReleaseArtifact[]
+
   // Audit
   createdBy    String?  @map("created_by")
   createdAt    DateTime @default(now()) @map("created_at")
@@ -740,6 +746,25 @@ model Release {
   @@index([isActive])
   @@index([productSlug, channel, isActive])
   @@map("releases")
+}
+
+// One component's artefact in a release: an image tarball, a binary for one platform, a
+// package. `platform` is "any" for something that runs everywhere (a Docker image, a .vsix).
+model ReleaseArtifact {
+  id               String   @id @default(uuid())
+  releaseId        String   @map("release_id")
+  release          Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  component        String
+  platform         String   @default("any")
+  key              String
+  size             BigInt
+  sha256           String
+  imageRef         String?  @map("image_ref")
+  componentVersion String?  @map("component_version")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@unique([releaseId, component, platform])
+  @@map("release_artifacts")
 }
 
 // =============================================================================

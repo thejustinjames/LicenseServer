@@ -6,6 +6,9 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Upload } from '@aws-sdk/lib-storage';
+import crypto from 'crypto';
+import { PassThrough } from 'stream';
 import { s3Client } from '../config/s3.js';
 import { config } from '../config/index.js';
 import * as productService from './product.service.js';
@@ -224,6 +227,63 @@ export async function uploadFile(
     size: body.length,
     contentType,
   };
+}
+
+/**
+ * Upload a stream to S3 in parts, hashing it on the way: for release artefacts too large to
+ * hold in memory (a Docker image runs to gigabytes). Past `maxBytes` the upload is aborted and
+ * ArtifactTooLargeError thrown.
+ */
+export async function uploadStream(
+  key: string,
+  source: NodeJS.ReadableStream,
+  contentType: string,
+  maxBytes: number,
+): Promise<{ key: string; size: number; sha256: string }> {
+  if (!config.S3_BUCKET_NAME) {
+    throw new Error('S3 bucket not configured');
+  }
+  const hash = crypto.createHash('sha256');
+  const pass = new PassThrough();
+  const upload = new Upload({
+    client: s3Client,
+    params: { Bucket: config.S3_BUCKET_NAME, Key: key, Body: pass, ContentType: contentType },
+    queueSize: 4,
+    partSize: 16 * 1024 * 1024,
+  });
+  let size = 0;
+  let tooLarge = false;
+  source.on('data', (chunk: Buffer) => {
+    if (tooLarge) return;
+    size += chunk.length;
+    if (size > maxBytes) {
+      tooLarge = true;
+      pass.destroy(new ArtifactTooLargeError(maxBytes));
+      void upload.abort().catch(() => undefined);
+      return;
+    }
+    hash.update(chunk);
+    if (!pass.write(chunk)) {
+      source.pause();
+      pass.once('drain', () => source.resume());
+    }
+  });
+  source.on('end', () => { if (!tooLarge) pass.end(); });
+  source.on('error', (err) => pass.destroy(err as Error));
+  try {
+    await upload.done();
+  } catch (error) {
+    if (tooLarge) throw new ArtifactTooLargeError(maxBytes);
+    throw error;
+  }
+  if (tooLarge) throw new ArtifactTooLargeError(maxBytes);
+  return { key, size, sha256: hash.digest('hex') };
+}
+
+export class ArtifactTooLargeError extends Error {
+  constructor(public readonly maxBytes: number) {
+    super(`The artefact is larger than ${maxBytes} bytes`);
+  }
 }
 
 /**

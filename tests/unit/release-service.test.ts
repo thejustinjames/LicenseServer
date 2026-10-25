@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import crypto from 'crypto';
 
-import { canonical, compareVersions, manifestOf, setSigningKeyForTests, signManifest, verifyManifest, signedManifestOf } from '../../src/services/release.service.js';
+import { canonical, compareVersions, manifestOf, setSigningKeyForTests, signManifest, verifyManifest, signedManifestOf, pickArtifact, componentAllowed } from '../../src/services/release.service.js';
 
 /**
  * A release manifest is what a deployment acts on, so its signature must cover every field that
@@ -63,5 +63,55 @@ describe('release manifests', () => {
     expect(compareVersions('1.10.0', '1.9.9')).toBe(1);
     expect(compareVersions('v1.1.106', '1.1.106')).toBe(0);
     expect(compareVersions('1.1.105-beta', '1.1.106')).toBe(-1);
+  });
+});
+
+describe('releases made of several parts', () => {
+  const artifacts = [
+    { component: 'aos', platform: 'any', key: 'releases/agencie-lab/1.2.3/aos-any-aos.tar.gz', size: BigInt(90_000_000), sha256: 'aa'.repeat(32), imageRef: 'agencie/aos:1.2.3', componentVersion: '1.2.3' },
+    { component: 'cloudcode', platform: 'linux-x64', key: 'releases/agencie-lab/1.2.3/cloudcode-linux-x64-cloudcode', size: BigInt(70_000_000), sha256: 'bb'.repeat(32), imageRef: null, componentVersion: '1.4.24' },
+    { component: 'cloudcode', platform: 'darwin-arm64', key: 'releases/agencie-lab/1.2.3/cloudcode-darwin-arm64-cloudcode', size: BigInt(68_000_000), sha256: 'cc'.repeat(32), imageRef: null, componentVersion: '1.4.24' },
+  ];
+
+  it('lists each component by platform, inside the signature; none means no components key at all', () => {
+    const m = manifestOf({ ...release, artifacts });
+    expect(m.components).toEqual({
+      aos: { any: { key: artifacts[0].key, size: 90_000_000, sha256: 'aa'.repeat(32), imageRef: 'agencie/aos:1.2.3', version: '1.2.3' } },
+      cloudcode: {
+        'linux-x64': { key: artifacts[1].key, size: 70_000_000, sha256: 'bb'.repeat(32), imageRef: null, version: '1.4.24' },
+        'darwin-arm64': { key: artifacts[2].key, size: 68_000_000, sha256: 'cc'.repeat(32), imageRef: null, version: '1.4.24' },
+      },
+    });
+    expect('components' in manifestOf({ ...release, artifacts: [] })).toBe(false);
+    expect(canonical(manifestOf({ ...release, artifacts: [] }))).toBe(canonical(manifestOf(release)));
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+    setSigningKeyForTests(privateKey.export({ type: 'pkcs1', format: 'pem' }).toString());
+    const pub = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const sig = signManifest(m)!;
+    expect(verifyManifest(m, sig, pub)).toBe(true);
+    const tampered = JSON.parse(JSON.stringify(m));
+    tampered.components.cloudcode['linux-x64'].sha256 = 'dd'.repeat(32);
+    expect(verifyManifest(tampered, sig, pub)).toBe(false);
+  });
+
+  it('picks the exact platform, then "any", else nothing', () => {
+    const m = manifestOf({ ...release, artifacts });
+    expect(pickArtifact(m, 'cloudcode', 'darwin-arm64')!.sha256).toBe('cc'.repeat(32));
+    expect(pickArtifact(m, 'aos', 'linux-x64')!.imageRef).toBe('agencie/aos:1.2.3');
+    expect(pickArtifact(m, 'cloudcode', 'windows-x64')).toBeNull();
+    expect(pickArtifact(m, 'vscode', 'any')).toBeNull();
+    expect(pickArtifact(manifestOf(release), 'aos', 'any')).toBeNull();
+  });
+
+  it('a component needs its module; the installer and updater need only the product; a legacy licence has everything', () => {
+    expect(componentAllowed('codeeasy', ['aos', 'codeeasy', 'cloudcode'])).toBe(true);
+    expect(componentAllowed('codeeasy', ['aos', 'cloudcode'])).toBe(false);
+    expect(componentAllowed('vscode', ['aos'])).toBe(true);
+    expect(componentAllowed('cloudcode', ['aos'])).toBe(false);
+    expect(componentAllowed('glue', ['aos'])).toBe(true);
+    expect(componentAllowed('updater', ['models-host'])).toBe(true);
+    expect(componentAllowed('models-runtime', ['models-host'])).toBe(true);
+    expect(componentAllowed('models-runtime', ['aos'])).toBe(false);
+    expect(componentAllowed('codeeasy', [])).toBe(true);
   });
 });

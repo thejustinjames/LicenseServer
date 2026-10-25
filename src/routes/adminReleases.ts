@@ -11,8 +11,8 @@ import { prisma } from '../config/database.js';
 import { logger } from '../services/logger.service.js';
 import crypto from 'crypto';
 import express from 'express';
-import { manifestOf, signManifest } from '../services/release.service.js';
-import { uploadFile, isS3Configured } from '../services/storage.service.js';
+import { manifestOf, signManifest, COMPONENT_RE, PLATFORM_RE, type ArtifactRow } from '../services/release.service.js';
+import { uploadFile, uploadStream, isS3Configured, ArtifactTooLargeError } from '../services/storage.service.js';
 
 const router = Router();
 
@@ -35,6 +35,16 @@ function signatureFor(row: Parameters<typeof manifestOf>[0]): string | null {
   return signManifest(manifestOf(row));
 }
 
+/** A release's component artefacts, for signing. */
+async function artifactsOf(releaseId: string): Promise<ArtifactRow[]> {
+  return prisma.releaseArtifact.findMany({ where: { releaseId }, orderBy: [{ component: 'asc' }, { platform: 'asc' }] });
+}
+
+/** A release as JSON: an artefact's size is a BigInt in the database and a number on the wire. */
+function jsonRelease<T extends { artifacts?: Array<{ size: bigint }> }>(r: T): unknown {
+  return r.artifacts ? { ...r, artifacts: r.artifacts.map((a) => ({ ...a, size: Number(a.size) })) } : r;
+}
+
 /**
  * GET /api/admin/releases
  * List all releases, optionally filtered by product
@@ -53,13 +63,14 @@ router.get('/', async (req: Request, res: Response) => {
 
     const releases = await prisma.release.findMany({
       where,
+      include: { artifacts: true },
       orderBy: [
         { productSlug: 'asc' },
         { releaseDate: 'desc' },
       ],
     });
 
-    res.json(releases);
+    res.json(releases.map(jsonRelease));
   } catch (error) {
     logger.error('Failed to list releases:', error);
     res.status(500).json({ error: 'Failed to list releases' });
@@ -98,6 +109,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const release = await prisma.release.findUnique({
       where: { id: req.params.id },
+      include: { artifacts: true },
     });
 
     if (!release) {
@@ -105,7 +117,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    res.json(release);
+    res.json(jsonRelease(release));
   } catch (error) {
     logger.error('Failed to get release:', error);
     res.status(500).json({ error: 'Failed to get release' });
@@ -218,7 +230,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       version: release.version,
     });
 
-    const signed = await prisma.release.update({ where: { id: release.id }, data: { signature: signatureFor(release) } });
+    const signed = await prisma.release.update({ where: { id: release.id }, data: { signature: signatureFor({ ...release, artifacts: await artifactsOf(release.id) }) } });
     res.json(signed);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -333,13 +345,88 @@ router.put('/:id/artifact', express.raw({ type: '*/*', limit: ARTIFACT_LIMIT }),
     const key = `releases/${release.productSlug}/${filename}`;
     const sha256 = crypto.createHash('sha256').update(body).digest('hex');
     await uploadFile(key, body, (req.headers['content-type'] as string) || 'application/octet-stream');
-    const row = { ...release, artifactKey: key, artifactSize: body.length, artifactSha256: sha256 };
+    const row = { ...release, artifactKey: key, artifactSize: body.length, artifactSha256: sha256, artifacts: await artifactsOf(release.id) };
     const updated = await prisma.release.update({ where: { id: release.id }, data: { artifactKey: key, artifactSize: body.length, artifactSha256: sha256, signature: signatureFor(row) } });
     logger.info('Release artefact stored', { releaseId: release.id, key, size: body.length });
     res.json(updated);
   } catch (error) {
     logger.error('Failed to store release artefact:', error);
     res.status(500).json({ error: 'Failed to store the artefact' });
+  }
+});
+
+/**
+ * PUT /api/admin/releases/:id/artifacts/:component?platform=<os-arch|any>&filename=<name>&imageRef=<ref>&version=<v>
+ *
+ * One component's artefact for a release made of several parts, as the raw request body,
+ * streamed to the bundle store in parts and hashed on the way (no size held in memory), so a
+ * Docker image of several gigabytes goes up. Stored under
+ * releases/<product>/<version>/<component>-<platform>-<filename>, so two releases never share an
+ * object. The manifest is re-signed with every component. The AOS image (component `aos`,
+ * platform `any`) also fills the release's single artefact and image reference, which consoles
+ * that know only those fields act on. Send it as application/octet-stream or gzip, never JSON.
+ */
+const COMPONENT_LIMIT = 8 * 1024 * 1024 * 1024;
+router.put('/:id/artifacts/:component', async (req: Request, res: Response) => {
+  // The request timeout is an idle timer; a store that stalls between parts should not cut a
+  // long upload short.
+  req.setTimeout(15 * 60_000);
+  res.setTimeout(15 * 60_000);
+  try {
+    if (!isS3Configured()) { res.status(503).json({ error: 'The bundle store (S3) is not configured' }); return; }
+    const component = req.params.component;
+    const platform = typeof req.query.platform === 'string' && req.query.platform ? req.query.platform : 'any';
+    if (!COMPONENT_RE.test(component)) { res.status(400).json({ error: 'component must be a short slug' }); return; }
+    if (!PLATFORM_RE.test(platform)) { res.status(400).json({ error: 'platform must be "any" or <os>-<arch>' }); return; }
+    const imageRef = typeof req.query.imageRef === 'string' && req.query.imageRef ? req.query.imageRef.slice(0, 200) : null;
+    const componentVersion = typeof req.query.version === 'string' && req.query.version ? req.query.version.slice(0, 50) : null;
+    const release = await prisma.release.findUnique({ where: { id: req.params.id } });
+    if (!release) { res.status(404).json({ error: 'Release not found' }); return; }
+    const given = typeof req.query.filename === 'string' ? req.query.filename : '';
+    const filename = (given || `${component}.bin`).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 120);
+    const key = `releases/${release.productSlug}/${release.version}/${component}-${platform}-${filename}`;
+    let stored: { size: number; sha256: string };
+    try {
+      stored = await uploadStream(key, req, (req.headers['content-type'] as string) || 'application/octet-stream', COMPONENT_LIMIT);
+    } catch (error) {
+      if (error instanceof ArtifactTooLargeError) { res.status(413).json({ error: error.message }); return; }
+      throw error;
+    }
+    if (stored.size === 0) { res.status(400).json({ error: 'An artefact body is required' }); return; }
+    await prisma.releaseArtifact.upsert({
+      where: { releaseId_component_platform: { releaseId: release.id, component, platform } },
+      create: { releaseId: release.id, component, platform, key, size: BigInt(stored.size), sha256: stored.sha256, imageRef, componentVersion },
+      update: { key, size: BigInt(stored.size), sha256: stored.sha256, imageRef, componentVersion },
+    });
+    const legacy = component === 'aos' && platform === 'any'
+      ? { artifactKey: key, artifactSize: stored.size, artifactSha256: stored.sha256, ...(imageRef ? { imageRef } : {}) }
+      : {};
+    const row = { ...release, ...legacy, artifacts: await artifactsOf(release.id) };
+    const updated = await prisma.release.update({ where: { id: release.id }, data: { ...legacy, signature: signatureFor(row) }, include: { artifacts: true } });
+    logger.info('Release component stored', { releaseId: release.id, component, platform, key, size: stored.size });
+    res.json(jsonRelease(updated));
+  } catch (error) {
+    logger.error('Failed to store release component:', error);
+    res.status(500).json({ error: 'Failed to store the component' });
+  }
+});
+
+/**
+ * DELETE /api/admin/releases/:id/artifacts/:component?platform=<os-arch|any>
+ * Takes a component's artefact out of the release (the object stays in the store) and re-signs.
+ */
+router.delete('/:id/artifacts/:component', async (req: Request, res: Response) => {
+  try {
+    const platform = typeof req.query.platform === 'string' && req.query.platform ? req.query.platform : 'any';
+    const release = await prisma.release.findUnique({ where: { id: req.params.id } });
+    if (!release) { res.status(404).json({ error: 'Release not found' }); return; }
+    const gone = await prisma.releaseArtifact.deleteMany({ where: { releaseId: release.id, component: req.params.component, platform } });
+    if (gone.count === 0) { res.status(404).json({ error: 'No such component artefact' }); return; }
+    const updated = await prisma.release.update({ where: { id: release.id }, data: { signature: signatureFor({ ...release, artifacts: await artifactsOf(release.id) }) }, include: { artifacts: true } });
+    res.json(jsonRelease(updated));
+  } catch (error) {
+    logger.error('Failed to remove release component:', error);
+    res.status(500).json({ error: 'Failed to remove the component' });
   }
 });
 
