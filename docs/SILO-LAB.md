@@ -53,6 +53,19 @@ Internet/Local Machine
 | silo-dns | 172.30.0.2 | 10053 | DNS resolution |
 | silo-storage | 172.30.0.12 | 9000 | S3-compatible storage |
 
+## Deploying to the lab
+
+The lab copy (`/opt/docker-projects/licenseserver` on docker-dev-01, `https://licenseserver.lab.silo.red`)
+is deployed by the Jenkins job `licenseserver-lab-deploy`, which polls `main` every 10 minutes and runs
+`deploy/lab/deploy-licenseserver-lab.sh` on the host: typecheck and tests in `node:20-bookworm`, copy the
+tracked files (no deletions; `.env`, `keys/` and `backups/` are never touched), build, dump the database
+into `backups/`, recreate the app container, wait for `/health`, and put the former image back if it does
+not answer. Do not hand-copy files to the host any more. Host-side notes: LabSetup
+`Bosgame/licenseserver-lab/README.md`.
+
+The container runs `prisma db push` as it starts, so a schema change in a commit applies on the lab when
+it deploys; one that would lose data is refused and the deploy rolls back to the former image.
+
 ## Management Commands
 
 ### Start Services
