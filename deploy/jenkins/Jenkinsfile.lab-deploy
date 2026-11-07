@@ -1,0 +1,68 @@
+// Deploy the licence server to the lab (docker-dev-01, 192.168.1.177).
+//
+// Jenkins runs on that same host, in a container with no Docker access. This
+// pipeline only SSHes to the host as labadmin and runs the deploy script, which
+// does the work (fetch, typecheck and tests in a node container, copy, build,
+// dump the database, restart, health check, put the former image back if not).
+// The same script can be run by hand, so Jenkins is a trigger and a log, never
+// the only way to deploy.
+//
+// Job: `licenseserver-lab-deploy`, Pipeline from SCM
+//   repo:        https://github.com/thejustinjames/LicenseServer.git, branch main
+//   credentials: JJ-Github-Repro-Token (username/password; the password is a
+//                fine-grained PAT with Contents read-only on this repo)
+//   script path: deploy/jenkins/Jenkinsfile.lab-deploy
+// Credential `lab-host-ssh`: SSH key for labadmin@192.168.1.177, pinned on the
+// host to /opt/docker-projects/deploy-gate.py, which allows this script and its
+// options and nothing else.
+//
+// The host fetches with the same PAT: it goes to the script on stdin, down the
+// SSH channel, never on a command line and never in this log.
+//
+// Polls main every 10 minutes. The script does nothing when the commit is
+// already deployed and the server answers, so a repeat run costs seconds.
+pipeline {
+    agent any
+    options {
+        disableConcurrentBuilds()
+        timeout(time: 45, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+    triggers { pollSCM('H/10 * * * *') }
+    parameters {
+        string(name: 'REF', defaultValue: 'main', description: 'Branch, tag or commit to deploy.')
+        booleanParam(name: 'FORCE', defaultValue: false, description: 'Rebuild even if this commit is already deployed.')
+        booleanParam(name: 'SKIP_CHECK', defaultValue: false, description: 'Skip the typecheck and tests on the host (only when they have just passed elsewhere).')
+        booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Say what would happen and change nothing.')
+    }
+    environment {
+        LAB_HOST = 'labadmin@192.168.1.177'
+        DEPLOY   = '/opt/docker-projects/licenseserver-ci/deploy-licenseserver-lab.sh'
+    }
+    stages {
+        stage('Deploy') {
+            steps {
+                withCredentials([
+                    usernamePassword(credentialsId: 'JJ-Github-Repro-Token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN'),
+                    sshUserPrivateKey(credentialsId: 'lab-host-ssh', keyFileVariable: 'KEY')
+                ]) {
+                    sh '''#!/bin/bash
+                        set -euo pipefail
+                        args=(--ref "${REF:-main}")
+                        [ "${FORCE:-false}" = true ] && args+=(--force)
+                        [ "${SKIP_CHECK:-false}" = true ] && args+=(--skip-check)
+                        [ "${DRY_RUN:-false}" = true ] && args+=(--dry-run)
+                        printf '%s\\n' "$GH_TOKEN" | ssh -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \\
+                            -o ServerAliveInterval=30 "$LAB_HOST" \\
+                            "$(printf '%q ' "$DEPLOY" "${args[@]}")"
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        failure {
+            echo 'Not deployed. Exit 4: the check failed. 7: not healthy after the restart; the former image is back, the schema is not (see the dump named above). 8: the build or restart failed. 9: the database dump failed; nothing was restarted. See the script output above.'
+        }
+    }
+}
