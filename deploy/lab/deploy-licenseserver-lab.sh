@@ -134,8 +134,14 @@ fi
 
 # --- 3. check -----------------------------------------------------------------
 # The image's own Node major. prisma generate before tsc: the client's types come from it.
-# The tests are unit tests and need no database.
-IN_SRC=(docker run --rm --init -u "$(id -u):$(id -g)" -v "$SRC:/src" -w /src -e HOME=/tmp "$NODE_IMAGE")
+# The tests are unit tests and need no database, but src/config validates the environment
+# when it is imported, so the variables it requires get throwaway values (nothing connects).
+IN_SRC=(docker run --rm --init -u "$(id -u):$(id -g)" -v "$SRC:/src" -w /src -e HOME=/tmp
+        -e NODE_ENV=test -e DATABASE_URL=postgresql://check:check@127.0.0.1:1/check
+        -e JWT_SECRET=lab-check-only-not-a-secret-0123456789abcdef
+        -e STRIPE_SECRET_KEY=sk_test_lab_check -e STRIPE_WEBHOOK_SECRET=whsec_lab_check
+        -e STRIPE_SUCCESS_URL=http://127.0.0.1/success -e STRIPE_CANCEL_URL=http://127.0.0.1/cancel
+        "$NODE_IMAGE")
 if [ "$SKIP_CHECK" = 1 ]; then
   say "skipping the typecheck and tests (--skip-check)"
 else
