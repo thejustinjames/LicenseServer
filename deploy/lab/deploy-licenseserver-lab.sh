@@ -189,7 +189,7 @@ if [ "$DRY_RUN" = 1 ]; then
 else
   mkdir -p "$BACKUPS"
   if docker exec "$DB_CONTAINER" pg_dump -U postgres license_server | gzip > "$dump.part" \
-     && [ "$(gzip -dc "$dump.part" | head -c 4096 | wc -c)" -gt 0 ]; then
+     && [ "$(gzip -dc "$dump.part" 2>/dev/null | head -c 4096 | wc -c)" -gt 0 ]; then
     mv "$dump.part" "$dump"
     say "dumped the database to $dump ($(du -h "$dump" | cut -f1))"
   else
