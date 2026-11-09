@@ -42,6 +42,8 @@ interface ValidationResponse {
   /** The components the deployment's licence enables now (aos, codeeasy, cloudcode, models-host). */
   components?: string[];
   tier?: string;
+  /** Who the licence is issued to, as the admin names the customer, so a rename reaches the deployment without a re-enrolment. */
+  customer?: string | null;
   action?: 'continue' | 'warn' | 'kill';
   killReason?: string;
   _ts?: number;
@@ -328,6 +330,7 @@ router.post('/validate', async (req, res) => {
       valid: true,
       message: 'Deployment validated',
       tier: deployment.license?.licenseType || 'standard',
+      customer: deployment.customer?.name ?? deployment.customer?.email ?? null,
       action: 'continue',
       _did: deploymentId,
     };
