@@ -17,6 +17,7 @@ needing the TypeScript toolchain.
 | `02-test-licenses.cjs` | One sample license per SKU, keyed against tier-specific QA customers. Activations + seat counts per the policy below. Run **after** `01-test-skus.cjs`. |
 | `03-silo-licence-scopes.cjs` | Gives every SILO SKU a scope code (`scope-cortex`, `scope-child-cortex`, `scope-agent`) and adds the Child Cortex SKUs and the agent seat pack. |
 | `04-silo-causal-trust-addon.cjs` | The causal trust add-on as a licence add-on (`license_add_ons`): granted to each Cortex Enterprise licence, child Enterprise licences linked to their parent so it covers them, and `causal_trust` removed from any product. Cortex-only, Enterprise only; see `src/services/addon.service.ts`. Needs `prisma/sql/2026-10-08-license-add-ons.sql`. |
+| `05-lab-tenant-entitlement.cjs` | Lab only. A licence whose id is the SILO lab Cortex's tenant id, under the agent seat pack SKU, with one pack of ten, so that Cortex's tenant entitlement refresh has something real to fetch (the token's tenant id is the licence id, and Cortex refuses a mismatch). Leaves an existing licence alone; prints only the key's last four characters. |
 
 ## Activation + seat policy applied by `02-test-licenses.cjs`
 
